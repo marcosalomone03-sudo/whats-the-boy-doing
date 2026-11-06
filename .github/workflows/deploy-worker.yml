@@ -55,6 +55,13 @@ jobs:
             "sources:", schedule.response.headers.get("X-WTBD-Schedule-Sources") || "header missing",
             "fallback diagnostic:", schedule.response.headers.get("X-WTBD-Schedule-Fallback-Error") || schedule.data._wtbdFallbackError || "none");
 
+          const pmo = await request("/api/schedule?origin=PMO&destination=NUE&year=2026&month=11");
+          if (!pmo.data || !Array.isArray(pmo.data.days)) throw new Error("PMO-NUE schedule did not return days[]");
+          const nov6 = pmo.data.days.find(day => Number(day.day) === 6);
+          const nov6Flights = (nov6?.flights || []).map(f => String(f.number || f.flightNumber || "").replace(/\\s/g, "").toUpperCase());
+          console.log("INFO PMO-NUE 2026-11-06 flights:", nov6Flights.join(", ") || "none");
+          if (!nov6Flights.includes("FR904")) throw new Error("Expected FR904 on 2026-11-06 was not recovered by the schedule fallback");
+
           const aircraft = await request("/api/aircraft?lat=51.4700&lon=-0.4543&dist=35");
           if (!aircraft.data || !Array.isArray(aircraft.data.ac)) {
             throw new Error("Aircraft endpoint did not return the expected ac[] structure");
