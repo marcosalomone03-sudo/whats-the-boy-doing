@@ -21,7 +21,7 @@ The app is published from this repository. Check that `config.js` contains the e
 
 ## Schedule source logic
 
-For every route touching NUE, the Worker queries the official Nuremberg Airport departures or arrivals board. If no matching flight is returned, it tries a Google Search fallback. Google is not a guaranteed timetable API; the fallback may return no result or incomplete information. The app must not invent a flight number or treat a Google snippet as an official confirmation.
+For every route touching NUE, the Worker queries the official Nuremberg Airport departures or arrivals board. If no matching flight is returned, it tries a Google Search fallback. Google is not a guaranteed timetable API. Automated search may be blocked or incomplete, so the app also provides a direct Google results link for manual fallback. Never invent a flight number or treat a Google snippet as official confirmation.
 
 ## ADS-B
 
