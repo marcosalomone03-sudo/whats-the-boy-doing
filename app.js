@@ -175,7 +175,7 @@
   }
   async function loadRoute(origin,destination,date) {
     const [year,month] = date.split("-");
-    const data = await get(`/api/schedule?origin=${origin}&destination=${destination}&year=${year}&month=${Number(month)}`);
+    const data = await get(`/api/schedule?origin=${origin}&destination=${destination}&year=${year}&month=${Number(month)}&date=${encodeURIComponent(date)}`);
     return normalizeSchedule(data,origin,destination,date);
   }
 
