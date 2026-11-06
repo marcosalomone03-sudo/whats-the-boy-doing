@@ -15,15 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Verify Aena and Nuremberg airport APIs
+      - name: Validate Aena pagination and Nuremberg production API
         run: |
           node --input-type=module <<'NODE'
-          const h={"User-Agent":"Mozilla/5.0 (compatible; WTBD/1.0)","Accept":"application/json,text/html,*/*","Origin":"https://www.aena.es","Referer":"https://www.aena.es/en/flight-info.html?iata=ALC"};
-          async function req(url,method="GET",headers=h){try{const r=await fetch(url,{method,headers,redirect:"follow",signal:AbortSignal.timeout(15000)});const t=await r.text();console.log("\nURL",url,"METHOD",method,"\nHTTP",r.status,"FINAL",r.url,"TYPE",r.headers.get("content-type"),"BYTES",t.length,"\nBODY",t.slice(0,5500));return t}catch(e){console.log("ERROR",url,String(e));return""}}
-          for(const type of ["S","L"])for(const airport of ["ALC","PMO","AGP"]){
-            await req("https://www.aena.es/sites/Satellite?pagename=AENA_ConsultarVuelos&airport="+airport+"&flightType="+type+"&limit=4&dosDias=si","POST");
-            await req("https://www.aena.es/sites/Satellite?pagename=AENA_ConsultarVuelos&airport="+airport+"&flightType="+type,"POST");
+          const h={"User-Agent":"Mozilla/5.0 (compatible; WTBD/1.0)","Accept":"application/json,*/*","Origin":"https://www.aena.es","Referer":"https://www.aena.es/en/flight-info.html?iata=ALC"};
+          async function fetchText(url,method="GET"){const r=await fetch(url,{method,headers:h,redirect:"follow",signal:AbortSignal.timeout(20000)});const t=await r.text();console.log("\nURL",url,"HTTP",r.status,"TYPE",r.headers.get("content-type"),"BYTES",t.length);return {r,t};}
+          for(const params of [
+            "limit=4&dosDias=si","limit=50&dosDias=si","limit=200&dosDias=si","limit=50&fecha=06%2F11%2F2026","limit=50&date=2026-11-06"
+          ]){
+            const {r,t}=await fetchText("https://www.aena.es/sites/Satellite?pagename=AENA_ConsultarVuelos&airport=ALC&flightType=L&"+params,"POST");
+            try{const a=JSON.parse(t);console.log("AENA COUNT",Array.isArray(a)?a.length:"not array","MATCH STN",Array.isArray(a)?a.filter(x=>x.iataOtro==="STN").map(x=>({flight:x.numVuelo,date:x.fecha,time:x.horaProgramada,est:x.horaEstimada,carrier:x.iataCompania})):null,"SAMPLE",Array.isArray(a)?a.slice(0,2):t.slice(0,500));}catch{console.log("AENA NONJSON",t.slice(0,500));}
           }
-          const nue=await req("https://www.airport-nuernberg.de/assets/index.ad3000b20012b9ee.js");
-          for(const term of ["apiUrl()","apiUrl:","apiUrl=","flight-status/departures","flight-status/arrivals","airportnue-service.justrelate.io","X-Api-Key","Authorization"]){let p=-1,n=0;while((p=nue.indexOf(term,p+1))>=0&&n++<4)console.log("\nNUE",term,nue.slice(Math.max(0,p-400),Math.min(nue.length,p+1100)));}
+          const {r,t}=await fetchText("https://www.airport-nuernberg.de/production/api/flight-status/departures?lang=en&airportIata=NUE&date=20261106");
+          try{const a=JSON.parse(t);console.log("NUE JSON COUNT",Array.isArray(a)?a.length:"not array","SAMPLE",Array.isArray(a)?a.slice(0,4):a);}catch{console.log("NUE NONJSON",t.slice(0,1000));}
+          const js=(await fetchText("https://www.aena.es/publica/assets/js/applications/infovuelos/infovuelos.main.chunk.js?v=1.34")).t;
+          for(const term of ["AENA_ConsultarVuelos","fechaVuelo","fecha=","dosDias","limit=4"]){let p=-1,n=0;while((p=js.indexOf(term,p+1))>=0&&n++<6)console.log("\nAENA SOURCE",term,js.slice(Math.max(0,p-800),Math.min(js.length,p+1400)));}
           NODE
