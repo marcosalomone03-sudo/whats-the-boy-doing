@@ -357,23 +357,18 @@
   async function aircraftNear(point,dist) {
     return get(`/api/aircraft?lat=${encodeURIComponent(point.lat)}&lon=${encodeURIComponent(point.lon)}&dist=${dist}`);
   }
-  const RYANAIR_737_TYPES = new Set(["B738", "B38M", "B737"]);
-  // Callsigns are operational identifiers and are NOT derived from public flight numbers.
-  // Do not use them to identify or reject an aircraft for a scheduled flight.
-  function aircraftCompatibility(ac, flight) {
+  // Restrict candidates to the two main Ryanair 737 variants and a known Ryanair Group operator label.
+  // Unknown operator metadata is not enough to pass the filter.
+  const RYANAIR_737_TYPES = new Set(["B738", "B38M"]);
+  const RYANAIR_GROUP_OPERATORS = /ryanair|malta air|buzz|lauda europe|ryanair sun|ryanair uk/;
+  // Callsigns are descriptive only: never match them to the public flight number.
+  function aircraftCompatibility(ac) {
     const type = String(ac.t || "").toUpperCase();
-    const operator = String(ac.ownOp || ac.operator || "").toLowerCase();
-    const operatorKnown = !!operator;
-    const operatorMatch = /ryanair|malta air|buzz|lauda|ryanair sun|ryanair uk/.test(operator);
-    if (isKnownAirbus(type)) return {ok:false, operatorMatch:false, typeMatch:false, reason:"Airbus excluded"};
+    const operator = String(ac.ownOp || ac.operator || "").toLowerCase().trim();
     const typeMatch = RYANAIR_737_TYPES.has(type);
-    // An explicitly different operator is negative evidence. A callsign prefix or suffix
-    // is never used as a flight-number match: Ryanair operational callsigns are independent.
-    if (operatorKnown && !operatorMatch) return {ok:false, operatorMatch:false, typeMatch, reason:"Different operator"};
-    if (!operatorMatch && !typeMatch) {
-      return {ok:false, operatorMatch:false, typeMatch:false, reason:"No compatible aircraft evidence"};
-    }
-    return {ok:true, operatorMatch, typeMatch, operatorKnown};
+    const operatorMatch = !!operator && RYANAIR_GROUP_OPERATORS.test(operator);
+    return {ok:typeMatch && operatorMatch, operatorMatch, typeMatch, operatorKnown:!!operator,
+      reason:!typeMatch?"Aircraft type excluded":!operatorMatch?"Ryanair Group operator not confirmed":""};
   }
   function isKnownAirbus(type) {
     const t = String(type || "").toUpperCase();
@@ -400,14 +395,15 @@
     if (!map.size && failures.length===results.length) throw new Error(failures[0]);
 
     const now=Date.now();
-    if (now < flight.departure.getTime()-120*60000 || now > flight.arrival.getTime()+240*60000) return [];
+    // Never request or reason from future observations. This function only consumes live ADS-B now.
+    if (now < flight.departure.getTime()-180*60000 || now > flight.arrival.getTime()+30*60000) return [];
     const routeBearing=bearing(origin,destination);
     const durationMinutes=Math.max(30,(flight.arrival.getTime()-flight.departure.getTime())/60000);
     const elapsedMinutes=(now-flight.departure.getTime())/60000;
     const expectedFraction=Math.max(0,Math.min(1,elapsedMinutes/durationMinutes));
     const candidates=[];
     for (const ac of map.values()) {
-      const compatibility=aircraftCompatibility(ac,flight);
+      const compatibility=aircraftCompatibility(ac);
       if (!compatibility.ok) continue;
       const pos={lat:numeric(ac.lat),lon:numeric(ac.lon)};
       const geo=routePosition(origin,destination,pos);
@@ -435,17 +431,15 @@
       if (!onGround && minutesAfterArrival>30) continue;
       if (onGround) {
         const minutesFromDeparture=(now-flight.departure.getTime())/60000;
-        const nearOriginInTime=distanceToOrigin<=12 && minutesFromDeparture>=-60 && minutesFromDeparture<=45;
-        const nearDestinationInTime=distanceToDestination<=12 && minutesAfterArrival>=-45 && minutesAfterArrival<=90;
+        // Before departure, a Ryanair 737 may be waiting at the origin. This is only a candidate,
+        // never a confirmed assignment; no future arrival-airport observation is requested.
+        const nearOriginInTime=distanceToOrigin<=18 && minutesFromDeparture>=-180 && minutesFromDeparture<=45;
+        const nearDestinationInTime=distanceToDestination<=18 && minutesAfterArrival>=-30 && minutesAfterArrival<=30;
         if (!nearOriginInTime && !nearDestinationInTime) continue;
       }
       // Require tighter route geometry and progress. A compatible aircraft type/operator
       // is not proof that this aircraft is operating this commercial flight.
       if (!onGround && (geo.crossTrack>38 || progressDifference>0.24) && !nearEndpoint) continue;
-      // Unknown-operator 737s need an especially tight positional, timing and heading match.
-      if (!compatibility.operatorMatch) {
-        if (geo.crossTrack > 28 || progressDifference > 0.18 || seen > 25 || (headingDifference !== null && headingDifference > 35)) continue;
-      }
       const headingScore=headingDifference===null?0:headingDifference<35?18:headingDifference<65?10:headingDifference<90?2:-12;
       const operatorScore=compatibility.operatorMatch?45:0;
       const typeScore=compatibility.typeMatch?18:0;
@@ -533,7 +527,7 @@
   async function run() {
     showError("");
     if (!WORKER) { showError("Worker URL not configured. Check config.js."); return; }
-    const route=$("route").value.trim().toUpperCase().replace(/\s+/g,"");
+    const route=$("route").value.trim().toUpperCase().replace(/\\s+/g,"");
     const date=$("flightDate").value;
     if (!ROUTE_RE.test(route)) { showError("Enter one airport code (BUD) or two (BUD-ALC)."); return; }
     if (!date) { showError("Choose a duty date."); return; }
@@ -542,50 +536,53 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; renderObserved('Loading FlyItalyADSB overflight checks…');
-    $("candidates").className="empty"; $("candidates").textContent="Searching timetable and live aircraft…";
+    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[];
+    $("observedFlights").textContent="Airport arrival checks are disabled: the app never queries future observations.";
+    $("candidates").className="empty"; $("candidates").textContent="Searching timetable and current ADS-B positions…";
     $("connection").textContent="Checking timetable…"; $("lastUpdated").textContent="SEARCHING";
     try {
       const responses=await Promise.allSettled(routes.map(([o,d])=>loadRoute(o,d,date)));
       const scheduleErrors=[];
       responses.forEach((r,i)=>{ if(r.status==="fulfilled")state.flights.push(...r.value); else scheduleErrors.push(`${routes[i].join("-")}: ${r.reason?.message||"schedule unavailable"}`); });
       state.flights.sort((a,b)=>a.departure-b.departure); render();
-      try { await loadObserved(date); } catch(e) { renderObserved("FlyItalyADSB overflight checks unavailable: "+(e.message||"API error")); }
-      const observedCandidates=observedAircraftCandidates();
       const deviceNow=new Date();
       const today=[deviceNow.getFullYear(),String(deviceNow.getMonth()+1).padStart(2,"0"),String(deviceNow.getDate()).padStart(2,"0")].join("-");
       if (date !== today) {
-        renderCandidates(observedCandidates,observedCandidates.length?"Historical FlyItalyADSB observations are listed here. The same ICAO at both airports is strong evidence, but not airline confirmation.":"No historical aircraft was linked to both airport windows. Live position matching is available only for today.");
-        $("connection").textContent="Timetable loaded · live aircraft matching is for today only";
+        renderCandidates([],"Historical ADS-B candidate reconstruction is not enabled. No future airport observations are queried.");
+        $("connection").textContent="Timetable loaded · live ADS-B is only available for today";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
-        if (scheduleErrors.length) showError(scheduleErrors.join("\n"));
+        if (scheduleErrors.length) showError(scheduleErrors.join("\\n"));
         return;
       }
       const nowMs=Date.now();
-      const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-120*60000&&nowMs<=f.arrival.getTime()+240*60000);
+      // Only flights that have not arrived long ago, or are due to depart within the next 3 hours.
+      const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-180*60000&&nowMs<=f.arrival.getTime()+30*60000);
       if (!searchFlights.length) {
-        renderCandidates(observedCandidates,observedCandidates.length?"FlyItalyADSB airport observations are listed here. Same ICAO at both ends is strong evidence, not airline confirmation.":"No scheduled flight falls within the live tracking window, and no aircraft was observed at both airport windows.");
+        renderCandidates([],"No flight is inside the live tracking window. No future observations were requested.");
         $("connection").textContent="Timetable loaded · no flight inside live window";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
-        if (scheduleErrors.length) showError(scheduleErrors.join("\n"));
+        if (scheduleErrors.length) showError(scheduleErrors.join("\\n"));
         return;
       }
-      $("connection").textContent="Timetable loaded · checking live ADS-B positions…";
+      $("connection").textContent="Timetable loaded · filtering current ADS-B traffic…";
       const all=[]; const adsbErrors=[];
       const found=await Promise.allSettled(searchFlights.map(f=>findCandidates(f)));
       found.forEach((r,i)=>{ if(r.status==="fulfilled")all.push(...r.value.map(ac=>({flight:searchFlights[i],aircraft:ac}))); else adsbErrors.push(`${searchFlights[i].origin}-${searchFlights[i].destination}: ${r.reason?.message||"ADS-B unavailable"}`); });
+      // One aircraft (one ICAO HEX) can appear only once in the final shortlist.
       const unique=new Map();
-      for (const item of all) { const key=String(item.aircraft.hex).toLowerCase(); const old=unique.get(key); if(!old||item.aircraft.score>old.aircraft.score)unique.set(key,item); }
-      const liveCandidates=[...unique.values()].sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,3);
-      const final=[...observedCandidates,...liveCandidates].slice(0,6);
+      for (const item of all) {
+        const key=String(item.aircraft.hex).toLowerCase();
+        const old=unique.get(key);
+        if(!old||item.aircraft.score>old.aircraft.score)unique.set(key,item);
+      }
+      const final=[...unique.values()].sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,6);
       state.candidates=final;
-      renderCandidates(final,final.length?"Historical airport observations and live positions are listed separately. None is an airline-confirmed assignment.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No aircraft was found in the scheduled airport windows or current route positions.");
+      renderCandidates(final,final.length?"Live ADS-B candidates only. Filtered to B738/B38M with a recognized Ryanair Group operator label. Position and route fit are not airline confirmation.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft passed both the Ryanair Group operator and B738/B38M filters.");
       try { await refreshSelected(); } catch(e) { console.warn("Could not refresh saved aircraft",e.message); }
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
-      if (final.length) $("connection").textContent=`${final.length} aircraft observations · none is automatically confirmed`;
-      else $("connection").textContent="No matching aircraft observation found";
-      if (scheduleErrors.length||adsbErrors.length) showError([...scheduleErrors,...adsbErrors].join("\n"));
+      $("connection").textContent=final.length?`${final.length} filtered live aircraft · not airline-confirmed`:"No aircraft passed the strict Ryanair 737 filter";
+      if (scheduleErrors.length||adsbErrors.length) showError([...scheduleErrors,...adsbErrors].join("\\n"));
     } catch(e) {
       showError(e.message||"Unable to load flight data."); $("connection").textContent="Unable to load flight data";
       renderCandidates([],"Search failed. Check the error message above and try again.");
