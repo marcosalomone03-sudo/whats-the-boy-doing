@@ -54,6 +54,9 @@ jobs:
             console.log("INFO",origin+"-"+destination,"source:",data.source,"flights:",flights.map(f=>f.flightNumber).join(", ")||"none");
             if(!data.source||(!data.source.includes("Nuremberg Airport")&&!data.source.includes("Google Search")))throw new Error("Schedule source metadata missing");
           }
+          const valencia=await request("/api/schedule?origin=VLC&destination=NUE&year=2026&month=11&date=2026-11-06");
+          const valenciaFlights=valencia.data.days.flatMap(day=>day.flights||[]);
+          console.log("INFO VLC-NUE 2026-11-06 source:",valencia.data.source,"flights:",valenciaFlights.map(f=>f.flightNumber).join(", ")||"none");
           const pmo=await request("/api/schedule?origin=PMO&destination=NUE&year=2026&month=11&date=2026-11-06");
           const pmoFlights=pmo.data.days.flatMap(day=>day.flights||[]).map(f=>f.flightNumber);
           console.log("INFO PMO-NUE 2026-11-06 source:",pmo.data.source,"flights:",pmoFlights.join(", ")||"none");
