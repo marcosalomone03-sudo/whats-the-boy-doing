@@ -347,6 +347,12 @@
       const minutesAfterArrival=(now-flight.arrival.getTime())/60000;
       if (!onGround && minutesAfterArrival>12 && distanceToDestination>22) continue;
       if (!onGround && minutesAfterArrival>30) continue;
+      if (onGround) {
+        const minutesFromDeparture=(now-flight.departure.getTime())/60000;
+        const nearOriginInTime=distanceToOrigin<=12 && minutesFromDeparture>=-60 && minutesFromDeparture<=45;
+        const nearDestinationInTime=distanceToDestination<=12 && minutesAfterArrival>=-45 && minutesAfterArrival<=90;
+        if (!nearOriginInTime && !nearDestinationInTime) continue;
+      }
       // All aircraft need a plausible progress estimate; exact callsigns cannot override it.
       if (!onGround && progressDifference>0.32 && !nearEndpoint) continue;
       // Unknown-operator 737s need an especially tight positional, timing and heading match.
