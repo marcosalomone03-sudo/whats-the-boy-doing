@@ -126,30 +126,51 @@
   }
   function normalizeSchedule(data,origin,destination,date) {
     const out = [];
+    const timePart = value => {
+      if (value === null || value === undefined) return "";
+      const match = String(value).match(/(?:T|^| )(\\d{2}:\\d{2})/);
+      return match ? match[1] : "";
+    };
+    const flightNo = (raw,carrier) => {
+      const value = String(raw || "").replace(/\\s+/g,"").toUpperCase();
+      if (!value) return "";
+      return /^[A-Z]{2,3}\\d/.test(value) ? value : `${String(carrier || "FR").toUpperCase()}${value}`;
+    };
     if (Array.isArray(data?.days)) {
-      const dayNo = Number(date.slice(-2));
       for (const day of data.days) {
-        if (Number(day.day) !== dayNo) continue;
-        for (const f of (Array.isArray(day.flights) ? day.flights : [])) {
-          const dep = f.departureTime || f.departureLocalTime || f.departureDateTime?.slice(11,16);
-          const arr = f.arrivalTime || f.arrivalLocalTime || f.arrivalDateTime?.slice(11,16);
-          const no = f.number || f.flightNumber || f.flightNo;
+        const dayValue = String(day.date || day.dateLocal || day.day || "");
+        const matchesDate = dayValue.includes("-")
+          ? dayValue.slice(0,10) === date
+          : Number(dayValue) === Number(date.slice(-2));
+        if (!matchesDate) continue;
+        for (const item of (Array.isArray(day.flights) ? day.flights : [])) {
+          const dep = timePart(item.departureTime || item.departureLocalTime || item.departureDateTime);
+          const arr = timePart(item.arrivalTime || item.arrivalLocalTime || item.arrivalDateTime);
+          const no = flightNo(item.flightNumber || item.number || item.flightNo,item.carrierCode);
           if (!dep || !arr || !no) continue;
-          const arrDate = f.arrivalDateTime?.slice(0,10) || undefined;
-          out.push(makeFlight(origin,destination,`${f.carrierCode || "FR"}${no}`,dep.slice(0,5),arr.slice(0,5),date,arrDate));
+          const arrDate = item.arrivalDateTime && String(item.arrivalDateTime).includes("T")
+            ? String(item.arrivalDateTime).slice(0,10) : undefined;
+          out.push(makeFlight(origin,destination,no,dep,arr,date,arrDate));
         }
       }
     }
     if (!out.length && Array.isArray(data)) {
       for (const item of data) for (const leg of (item.legs || [item])) {
-        const dep = leg.departureDateTime, arr = leg.arrivalDateTime;
-        if (!dep || !arr || dep.slice(0,10) !== date) continue;
-        out.push(makeFlight(origin,destination,leg.flightNumber || item.flightNumber || "FR?",dep.slice(11,16),arr.slice(11,16),date,arr.slice(0,10)));
+        const depRaw = leg.departureDateTime || leg.departureTime;
+        const arrRaw = leg.arrivalDateTime || leg.arrivalTime;
+        const depDate = String(depRaw || "").slice(0,10);
+        if (!depRaw || !arrRaw || (depDate.includes("-") && depDate !== date)) continue;
+        const dep = timePart(depRaw), arr = timePart(arrRaw);
+        const no = flightNo(leg.flightNumber || item.flightNumber || leg.number || item.number,leg.carrierCode || item.carrierCode);
+        if (dep && arr && no) out.push(makeFlight(origin,destination,no,dep,arr,date,String(arrRaw).slice(0,10)));
       }
     }
     const unique = new Map();
-    for (const f of out) unique.set(`${f.flightNumber}|${f.departure.getTime()}`,f);
-    return [...unique.values()];
+    for (const flight of out) {
+      if (!Number.isFinite(flight.departure.getTime()) || !Number.isFinite(flight.arrival.getTime())) continue;
+      unique.set(`${flight.flightNumber}|${flight.departure.getTime()}`,flight);
+    }
+    return [...unique.values()].sort((a,b)=>a.departure-b.departure);
   }
   async function loadRoute(origin,destination,date) {
     const [year,month] = date.split("-");
@@ -247,7 +268,7 @@
     if (!map.size && failures.length===results.length) throw new Error(failures[0]);
 
     const now=Date.now();
-    if (now < flight.departure.getTime()-45*60000 || now > flight.arrival.getTime()+90*60000) return [];
+    if (now < flight.departure.getTime()-120*60000 || now > flight.arrival.getTime()+240*60000) return [];
     const routeBearing=bearing(origin,destination);
     const durationMinutes=Math.max(30,(flight.arrival.getTime()-flight.departure.getTime())/60000);
     const elapsedMinutes=(now-flight.departure.getTime())/60000;
@@ -306,7 +327,7 @@
   }
   function render() {
     const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();
-    $("sectors").innerHTML=flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)}</small></div><div class="time">${fmt(f.departure,airport(f.origin).tz)}<small>arr ${fmt(f.arrival,airport(f.destination).tz)}</small></div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`;
+    $("sectors").innerHTML=flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)}</small></div><div class="time">${fmt(f.departure,airport(f.origin).tz)}<small>arr ${fmt(f.arrival,airport(f.destination).tz)}</small></div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`;
     $("sectorCount").textContent=flights.length+" SECTORS";
     const next=flights.find(f=>f.departure>now);
     $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>Scheduled departure</small><strong>${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>Scheduled arrival</small><strong>${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
@@ -375,10 +396,10 @@
         return;
       }
       const nowMs=Date.now();
-      const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-45*60000&&nowMs<=f.arrival.getTime()+90*60000);
+      const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-120*60000&&nowMs<=f.arrival.getTime()+240*60000);
       if (!searchFlights.length) {
         renderCandidates([],"No scheduled flight is within its live tracking window for this date. No unrelated aircraft are shown.");
-        $("connection").textContent="Timetable loaded · no active scheduled flight";
+        $("connection").textContent="Timetable loaded · no flight inside the extended live window";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
         if (scheduleErrors.length) showError(scheduleErrors.join("\n"));
         return;
