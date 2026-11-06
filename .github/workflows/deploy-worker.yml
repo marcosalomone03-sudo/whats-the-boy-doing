@@ -28,6 +28,17 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
 
+      - name: Configure FlightNerve API key (when provided)
+        if: ${{ secrets.FLIGHTNERVE_API_KEY != '' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          secrets: |
+            FLIGHTNERVE_API_KEY
+        env:
+          FLIGHTNERVE_API_KEY: ${{ secrets.FLIGHTNERVE_API_KEY }}
+
       - name: Smoke-test live Worker endpoints
         env:
           WORKER_URL: https://wtbd-flight-proxy.marco-salomone-03.workers.dev
@@ -58,7 +69,7 @@ jobs:
           if (!pmo.data || !Array.isArray(pmo.data.days)) throw new Error("PMO-NUE schedule did not return days[]");
           const nov6 = pmo.data.days.find(day => Number(day.day) === 6);
           const nov6Flights = (nov6?.flights || []).map(f => String(f.number || f.flightNumber || "").replace(/\\s/g, "").toUpperCase());
-          console.log("INFO PMO-NUE 2026-11-06 flights:", nov6Flights.join(", ") || "none");
+          console.log("INFO PMO-NUE 2026-11-06 flights:", nov6Flights.join(", ") || "none", "source:", pmo.response.headers.get("X-WTBD-Schedule-Sources") || "header missing");
           if (!nov6Flights.includes("FR904")) console.warn("WARN FR904 on 2026-11-06 is still absent; timetable gap remains unresolved");
           else console.log("PASS FR904 recovered for 2026-11-06");
 
