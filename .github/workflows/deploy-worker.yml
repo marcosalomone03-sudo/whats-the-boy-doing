@@ -68,6 +68,9 @@ jobs:
           const corridor=await request("/api/aircraft?lat=44.0&lon=5.0&dist=240");
           if(!Array.isArray(corridor.data.ac))throw new Error("ADS-B corridor response missing ac[]");
           console.log("INFO ADS-B aircraft in VLC-NUE corridor:",corridor.data.ac.length);
+          const feedSource=corridor.response.headers.get("X-WTBD-ADS-B-Source");
+          console.log("INFO VLC-NUE live feed source:",feedSource||"not reported");
+          if(feedSource!=="FlyItalyADSB")throw new Error("FlyItalyADSB primary feed not active; got "+(feedSource||"no source header"));
           const hex=aircraft.data.ac.find(a=>/^[0-9a-f]{6}$/i.test(String(a.hex||"")))?.hex;
           if(hex)await request("/api/hex?icao="+encodeURIComponent(hex));
           NODE
