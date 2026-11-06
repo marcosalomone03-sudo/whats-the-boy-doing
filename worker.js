@@ -43,7 +43,7 @@ function boardDate(row){
  const value=pick(row,["scheduledLocalDate","scheduledDate","localDate","date","operationDate","departureDate","arrivalDate","scheduledArrivalDate","scheduledDepartureDate"]);
  if(value==="")return "";
  const raw=String(value);
- const digits=raw.replace(/\\D/g,"");
+ const digits=raw.replace(/\D/g,"");
  return digits.length>=8?digits.slice(0,8):"";
 }
 function boardClock(row){
@@ -51,7 +51,7 @@ function boardClock(row){
  if(value==="")return "";
  if(typeof value==="object")return time24(pick(value,["dateTime","time","local","value"]));
  const raw=String(value).trim();
- if(/^\\d{1,2}:\\d{2}/.test(raw))return time24(raw);
+ if(/^\d{1,2}:\d{2}/.test(raw))return time24(raw);
  const parsed=new Date(raw);
  if(Number.isFinite(parsed.getTime()))return localNueTime(parsed.toISOString());
  return time24(raw);
@@ -64,13 +64,13 @@ function normalizeBoardRows(payload,origin,destination,date,direction){
  return rows.map(row=>{
   const flight=row?.flight&&typeof row.flight==="object"?row.flight:row;
   const airline=String(flight?.airline?.iata||flight?.airline?.code||row?.airline?.iata||row?.airline?.code||row?.carrier?.iata||row?.carrierCode||row?.airlineCode||"").toUpperCase();
-  const rawNumber=String(flight?.number||flight?.flightNumber||row?.flightNumber||row?.number||row?.flightNo||row?.ident||row?.iataFlightNumber||"").replace(/\\s/g,"").toUpperCase();
-  const number=/^(FR|RK|RR|OE)\\d{1,5}$/.test(rawNumber)?rawNumber:airline+rawNumber;
+  const rawNumber=String(flight?.number||flight?.flightNumber||row?.flightNumber||row?.number||row?.flightNo||row?.ident||row?.iataFlightNumber||"").replace(/\s/g,"").toUpperCase();
+  const number=/^(FR|RK|RR|OE)\d{1,5}$/.test(rawNumber)?rawNumber:airline+rawNumber;
   const from=boardAirport(row,"from"),to=boardAirport(row,"to");
   const localDate=boardDate(row);
   // The airport board query itself is route-filtered. Validate every endpoint/date
   // the API supplies, but tolerate omitted fields when the endpoint has already filtered them.
-  if(!/^((FR|RK|RR|OE)\\d{1,5})$/.test(number))return null;
+  if(!/^((FR|RK|RR|OE)\d{1,5})$/.test(number))return null;
   if((from&&from!==expectedFrom)||(to&&to!==expectedTo))return null;
   if(from&&to&&(from!==expectedFrom||to!==expectedTo))return null;
   if(localDate&&Number(localDate)!==wantedDate)return null;
