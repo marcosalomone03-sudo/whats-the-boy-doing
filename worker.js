@@ -132,7 +132,7 @@ function poolHex(r){return String(r?.icao||r?.hex||r?.hex_id||r?.icao24||"").toL
 function poolType(r){return String(r?.t||r?.type||r?.aircraft_type||r?.icao_type||"").toUpperCase();}
 function poolTime(r){const v=r?.closest_time??r?.timestamp??r?.time??r?.seen;if(typeof v==="number")return new Date(v<1e12?v*1000:v).toISOString();const d=new Date(v);return Number.isFinite(d.getTime())?d.toISOString():null;}
 async function poolFetch(env,from,to){
- const base="https://api.flyitalyadsb.com/v2/overflights?lat=49.4987&lon=11.0780&dist=10&to="+encodeURIComponent(to.toISOString())+"&limit=500";
+ const base="https://api.flyitalyadsb.com/v2/overflights?lat=49.4987&lon=11.0780&dist=1&to="+encodeURIComponent(to.toISOString())+"&limit=500";
  let cursor=new Date(from),allRows=[],pages=[],lastMeta=null,truncated=false;
  // FlyItalyADSB can truncate a six-hour response before the requested end.
  // Continue at complete_until until the requested interval is covered.
@@ -172,7 +172,7 @@ async function updatePool(env,day,from,to,mode){
  }
  diagnostics.accepted=accepted;
  const unique=[...new Map(obs.slice(-5000).map(x=>[x.hex+"|"+x.time,x])).values()];
- const value={airport:"NUE",date:day,updatedAt:new Date().toISOString(),mode,source:"FlyItalyADSB - 10 km NUE area",diagnostics,aircraft,aircraftCount:Object.keys(aircraft).length,observationCount:unique.length,observations:unique,limitations:["Area observation does not prove landing, takeoff, basing or flight assignment.","Only B738/B38M observations are retained.","Coverage gaps are possible."]};
+ const value={airport:"NUE",date:day,updatedAt:new Date().toISOString(),mode,source:"FlyItalyADSB - 1 km NUE airport area",diagnostics,aircraft,aircraftCount:Object.keys(aircraft).length,observationCount:unique.length,observations:unique,limitations:["Area observation does not prove landing, takeoff, basing or flight assignment.","Only B738/B38M observations are retained.","Coverage gaps are possible."]};
  await env.AIRCRAFT_POOL.put(key,JSON.stringify(value),{expirationTtl:259200});
  return {accepted,aircraftCount:value.aircraftCount,diagnostics};
 }
