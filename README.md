@@ -1,5 +1,7 @@
 # What's the boy doing? — flight tracker
 
+Current app release: **V17**. Deployment refresh: 6 November 2026.
+
 A personal flight-day tracker for Ryanair-group flights operating to or from Nuremberg (NUE). The app loads a refreshed global IATA airport catalogue with coordinates and IANA time zones, so airport codes such as VLC do not need to be hardcoded.
 
 ## Flight discovery
