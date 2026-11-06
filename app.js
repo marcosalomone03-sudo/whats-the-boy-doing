@@ -6,7 +6,7 @@
   const cfg = window.WTBD_CONFIG || {};
   const WORKER = String(cfg.WORKER_URL || cfg.workerUrl || "").replace(/\/+$/, "");
   const ROUTE_RE = /^[A-Z]{3}(?:-[A-Z]{3})?$/;
-  const STORAGE_KEY = "wtbd-selected-v2";
+  const STORAGE_KEY = "wtbd-selected-v3";
 
   let AIRPORTS = {
     NUE:{name:"Nuremberg",tz:"Europe/Berlin",lat:49.4987,lon:11.0780},
@@ -319,7 +319,7 @@
       const progressDifference=Math.abs(fraction-expectedFraction);
       const distanceToOrigin=hav(origin,pos);
       const distanceToDestination=hav(destination,pos);
-      // A callsign match is not enough: aircraft direction must agree with the scheduled leg.
+      // Callsign is deliberately ignored: it is not a reliable key for a public flight number.
       // Near either airport, turns and runway alignment make heading less decisive.
       const nearEndpoint=Math.min(distanceToOrigin,distanceToDestination)<=8;
       if (!onGround && headingDifference!==null && headingDifference>105 && Math.min(distanceToOrigin,distanceToDestination)>6) continue;
@@ -336,23 +336,23 @@
         const nearDestinationInTime=distanceToDestination<=12 && minutesAfterArrival>=-45 && minutesAfterArrival<=90;
         if (!nearOriginInTime && !nearDestinationInTime) continue;
       }
-      // All aircraft need a plausible progress estimate; exact callsigns cannot override it.
-      if (!onGround && progressDifference>0.32 && !nearEndpoint) continue;
+      // Require tighter route geometry and progress. A compatible aircraft type/operator
+      // is not proof that this aircraft is operating this commercial flight.
+      if (!onGround && (geo.crossTrack>38 || progressDifference>0.24) && !nearEndpoint) continue;
       // Unknown-operator 737s need an especially tight positional, timing and heading match.
       if (!compatibility.operatorMatch) {
         if (geo.crossTrack > 28 || progressDifference > 0.18 || seen > 25 || (headingDifference !== null && headingDifference > 35)) continue;
       }
       const headingScore=headingDifference===null?0:headingDifference<35?18:headingDifference<65?10:headingDifference<90?2:-12;
-      const callScore=compatibility.operatorMatch?55:0;
+      const operatorScore=compatibility.operatorMatch?45:0;
       const typeScore=compatibility.typeMatch?18:0;
       const routeScore=Math.max(0,22-geo.crossTrack/3);
       const progressScore=Math.max(0,18-progressDifference*30);
       const freshnessScore=Math.max(0,14-seenPos/4);
       const groundPenalty=onGround && fraction>0.12 && fraction<0.88 ? 20:0;
-      const score=callScore+typeScore+routeScore+progressScore+headingScore+freshnessScore-groundPenalty;
-      if (score < 28) continue;
-      const confidence=score>=90?"HIGH":score>=60?"MEDIUM":"LOW";
-      candidates.push({...ac,score,confidence,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,routeBearing,headingDifference,altitude,onGround,seenPos,typeMatch:compatibility.typeMatch,expectedFraction});
+      const score=operatorScore+typeScore+routeScore+progressScore+headingScore+freshnessScore-groundPenalty;
+      if (score < 35) continue;
+      candidates.push({...ac,score,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,routeBearing,headingDifference,altitude,onGround,seenPos,typeMatch:compatibility.typeMatch,operatorMatch:compatibility.operatorMatch,expectedFraction,matchStatus:"POSSIBLE ONLY"});
     }
     return candidates.sort((a,b)=>b.score-a.score).slice(0,3);
   }
@@ -369,7 +369,7 @@
     const taxiing=onGround && speed!==null && speed>=5;
     const status=onGround?(taxiing?"TAXIING":"ON GROUND"):altitude!==null?"AIRBORNE":"UNKNOWN";
     const statusClass=onGround?"ground":status==="AIRBORNE"?"air":"none";
-    return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><span class="status ${statusClass}">${status}</span></div>
+    return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><span class="status ${statusClass}">${status}</span></div><div class="notice">MANUALLY SELECTED ADS-B CANDIDATE — free data sources do not confirm that this aircraft is assigned to ${esc(flight.flightNumber)}. Registration and HEX below are read directly from its transponder feed.</div>`
       <div class="stats">
         <div class="stat"><small>Actual callsign</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
         <div class="stat"><small>ICAO HEX</small><strong>${esc(ac.hex)}</strong></div>
@@ -388,9 +388,9 @@
     $("sectorCount").textContent=flights.length+" SECTORS";
     const next=flights.find(f=>f.departure>now);
     $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
-    $("current").innerHTML=state.selected?renderAircraft(state.selected.flight,state.selected.aircraft):`<div class="empty">No aircraft confirmed yet. Select a candidate below.</div>`;
+    $("current").innerHTML=state.selected?renderAircraft(state.selected.flight,state.selected.aircraft):`<div class="empty">No aircraft selected. Possible ADS-B candidates require manual checking.</div>`;
     const last=storageGet();
-    $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST SELECTED</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
+    $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST MANUAL SELECTION</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
   }
   function renderCandidates(items,message="No reliable Ryanair aircraft match found for the selected date, route and time.") {
     const el=$("candidates");
@@ -399,17 +399,17 @@
     el.innerHTML=items.map((item,i)=>{
       const f=item.flight, ac=item.aircraft;
       const dateLabel=new Intl.DateTimeFormat("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(`${f.date}T12:00:00Z`));
-      const confidence=ac.confidence||"UNVERIFIED";
-      const confidenceClass=confidence==="HIGH"?"ground":confidence==="MEDIUM"?"air":"none";
+      const confidence="POSSIBLE";
+      const confidenceClass="none";
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
-      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} MATCH</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · operator verified":""} · SOURCE ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
+      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} · NOT VERIFIED</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · ADS-B operator label matches Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
     }).join("");
     el.querySelectorAll("[data-pick]").forEach(button=>button.addEventListener("click",()=>{
       const item=items[Number(button.dataset.pick)]; if(!item)return;
       saveSelected(item.flight,item.aircraft); render();
-      $("connection").textContent="Aircraft selected · ICAO HEX saved";
+      $("connection").textContent="Possible aircraft selected manually · not flight-confirmed";
     }));
   }
 
@@ -462,7 +462,7 @@
         if (scheduleErrors.length) showError(scheduleErrors.join("\n"));
         return;
       }
-      $("connection").textContent="Timetable loaded · filtering Ryanair-compatible aircraft…";
+      $("connection").textContent="Timetable loaded · checking live ADS-B positions…";
       const all=[]; const adsbErrors=[];
       const found=await Promise.allSettled(searchFlights.map(f=>findCandidates(f)));
       found.forEach((r,i)=>{ if(r.status==="fulfilled")all.push(...r.value.map(ac=>({flight:searchFlights[i],aircraft:ac}))); else adsbErrors.push(`${searchFlights[i].origin}-${searchFlights[i].destination}: ${r.reason?.message||"ADS-B unavailable"}`); });
@@ -474,8 +474,8 @@
       try { await refreshSelected(); } catch(e) { console.warn("Could not refresh saved aircraft",e.message); }
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
-      if (final.length) $("connection").textContent=`${final.length} filtered candidate${final.length===1?"":"s"} · manually confirm the correct aircraft`;
-      else $("connection").textContent="No reliable Ryanair aircraft match · no generic traffic shown";
+      if (final.length) $("connection").textContent=`${final.length} possible ADS-B aircraft · none is automatically confirmed`;
+      else $("connection").textContent="No plausible aircraft found in the live ADS-B data";
       if (scheduleErrors.length||adsbErrors.length) showError([...scheduleErrors,...adsbErrors].join("\n"));
     } catch(e) {
       showError(e.message||"Unable to load flight data."); $("connection").textContent="Unable to load flight data";
