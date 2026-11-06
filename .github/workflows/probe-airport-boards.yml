@@ -15,19 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Test Nuremberg service and Palermo official board
+      - name: Test Nuremberg official flight plan feed
         run: |
           node --input-type=module <<'NODE'
-          async function req(url,headers={}){try{const r=await fetch(url,{headers:{"User-Agent":"Mozilla/5.0 (compatible; WTBD/1.0)","Accept":"application/json,text/html,*/*",...headers},redirect:"follow",signal:AbortSignal.timeout(20000)});const t=await r.text();console.log("\nURL",url,"HTTP",r.status,"FINAL",r.url,"TYPE",r.headers.get("content-type"),"BYTES",t.length,"BODY",t.slice(0,2500));return t}catch(e){console.log("ERROR",url,String(e));return""}}
-          const base="https://airportnue-service.justrelate.io/production/api/flight-status/";
-          for(const dir of ["departures","arrivals"]){
-            await req(base+dir+"?lang=en&airportIata=NUE&date=20261106",{"Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"});
-            await req(base+dir+"?lang=en&airportIata=NUE&date=2026-11-06",{"Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"});
-            await req(base+dir+"?lang=en&airportIata=NUE",{"Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"});
-          }
-          for(const url of ["https://www.aeroportodipalermo.it/voli/","https://www.aeroportodipalermo.it/en/voli/","https://aeroportodipalermo.it/voli/"]){
-            const html=await req(url);
-            console.log("PALERMO FLIGHT NUMBERS",JSON.stringify([...new Set(html.match(/\b(?:FR|W4|AZ|U2|BA|EW|VY|IB)\s?\d{2,5}\b/g)||[])].slice(0,40)));
-            console.log("PALERMO SCRIPTS",JSON.stringify([...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m=>m[1]).slice(-20)));
+          const h={"User-Agent":"Mozilla/5.0 (compatible; WTBD/1.0)","Accept":"application/json,*/*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"};
+          for(const url of [
+            "https://airportnue-service.justrelate.io/production/api/flight-plan?lang=en&airports=NUE&dateRanges=20261106:20261106",
+            "https://airportnue-service.justrelate.io/production/api/flight-plan?lang=en&airports=NUE&dateRanges=2026-11-06:2026-11-06",
+            "https://airportnue-service.justrelate.io/production/api/flight-plan?lang=en&airports=NUE",
+            "https://airportnue-service.justrelate.io/production/api/flight-status/departures?lang=en&airportIata=NUE"
+          ]){
+            try{const r=await fetch(url,{headers:h,signal:AbortSignal.timeout(20000)});const t=await r.text();console.log("\nURL",url,"HTTP",r.status,"TYPE",r.headers.get("content-type"),"BYTES",t.length,"BODY",t.slice(0,7000));try{const j=JSON.parse(t);console.log("JSON SHAPE",Array.isArray(j)?"array "+j.length:Object.keys(j||{}),"FIRST",Array.isArray(j)?j.slice(0,3):j);}catch{}}catch(e){console.log("ERROR",url,String(e));}
           }
           NODE
