@@ -187,7 +187,10 @@
             dep=times.dep; arr=times.arr; depDate=times.depDate; arrDate=times.arrDate; estimated=times.estimated;
           }
           if (!dep || !arr || !no) continue;
-          out.push(makeFlight(origin,destination,no,dep,arr,depDate,arrDate,estimated,item.source||data.source||"Schedule"));
+          const normalized=makeFlight(origin,destination,no,dep,arr,depDate,arrDate,estimated,item.source||data.source||"Schedule");
+          Object.assign(normalized,{boardStatus:item.boardStatus||"",boardActualTime:item.boardActualTime||"",boardEstimatedTime:item.boardEstimatedTime||"",
+            boardScheduledTime:item.boardScheduledTime||"",boardDirection:item.boardType||"",boardRegistration:item.boardRegistration||"",boardAircraftType:item.boardAircraftType||""});
+          out.push(normalized);
         }
       }
     }
@@ -199,7 +202,12 @@
         if (!depRaw || !arrRaw || (depDate.includes("-") && depDate !== date)) continue;
         const dep = timePart(depRaw), arr = timePart(arrRaw);
         const no = flightNo(leg.flightNumber || item.flightNumber || leg.number || item.number,leg.carrierCode || item.carrierCode);
-        if (dep && arr && no) out.push(makeFlight(origin,destination,no,dep,arr,date,String(arrRaw).slice(0,10),{},item.source||data.source||"Schedule"));
+        if (dep && arr && no) {
+          const normalized=makeFlight(origin,destination,no,dep,arr,date,String(arrRaw).slice(0,10),{},item.source||data.source||"Schedule");
+          Object.assign(normalized,{boardStatus:item.boardStatus||"",boardActualTime:item.boardActualTime||"",boardEstimatedTime:item.boardEstimatedTime||"",
+            boardScheduledTime:item.boardScheduledTime||"",boardDirection:item.boardType||"",boardRegistration:item.boardRegistration||"",boardAircraftType:item.boardAircraftType||""});
+          out.push(normalized);
+        }
       }
     }
     const unique = new Map();
@@ -526,6 +534,29 @@
     const missingGoogleLinks=state.googleLinks.filter(x=>!flights.some(f=>x.route===f.origin+"-"+f.destination));
     $("sectors").innerHTML=(flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)} · ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small></div><div class="time">${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>arr ${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</small></div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`)+(missingGoogleLinks.length?`<div class="notice">Google fallback searches (only routes without a scheduled result): ${missingGoogleLinks.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.route)} ↗</a>`).join(" · ")}</div>`:"");
     $("sectorCount").textContent=flights.length+" SECTORS";
+    const historyEl=$("dailyHistory");
+    if(historyEl){
+      const history=[...flights].sort((a,b)=>a.departure-b.departure).map(f=>{
+        const isArrival=f.boardDirection==="arrival";
+        const actual=String(f.boardActualTime||"").slice(0,5);
+        const scheduled=String(f.boardScheduledTime||(isArrival?f.arrivalLocal:f.departureLocal)||"").slice(0,5);
+        const status=String(f.boardStatus||"").trim();
+        const eventTime=actual||f.boardEstimatedTime||"";
+        let deltaText="";
+        if(actual&&/^\\d{2}:\\d{2}$/.test(actual)&&/^\\d{2}:\\d{2}$/.test(scheduled)){
+          const toMin=x=>Number(x.slice(0,2))*60+Number(x.slice(3,5));
+          let delta=toMin(actual)-toMin(scheduled);
+          if(delta>720)delta-=1440;if(delta< -720)delta+=1440;
+          deltaText=delta===0?"ON TIME":Math.abs(delta)+" MIN "+(delta<0?"EARLY":"LATE");
+        }
+        const inferred=status?status.toUpperCase():(actual?(isArrival?"LANDED":"DEPARTED"):"SCHEDULED · NO ACTUAL TIME");
+        const badgeClass=/cancel|divert|delay|late/i.test(inferred)?"ground":actual?"air":"none";
+        const eventLabel=actual?(isArrival?"ACTUAL ARRIVAL":"ACTUAL DEPARTURE"):f.boardEstimatedTime?(isArrival?"EST. ARRIVAL":"EST. DEPARTURE"):"SCHEDULED";
+        const meta=[eventLabel,eventTime||scheduled,deltaText,f.boardRegistration,f.boardAircraftType].filter(Boolean).join(" · ");
+        return `<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(meta)} · ${esc(f.source||"Nuremberg Airport")}</small></div><span class="status ${badgeClass}">${esc(inferred)}</span></div>`;
+      });
+      historyEl.innerHTML=history.length?history.join(""):`<div class="empty">No flight records returned for this route and date.</div>`;
+    }
     const next=flights.find(f=>f.departure>now);
     $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
     $("current").innerHTML=state.selected?renderAircraft(state.selected.flight,state.selected.aircraft):`<div class="empty">No aircraft selected. Possible ADS-B candidates require manual checking.</div>`;
