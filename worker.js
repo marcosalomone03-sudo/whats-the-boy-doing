@@ -123,11 +123,62 @@ function cors(body,status=200,headers={}){
  const h=new Headers(headers);h.set("Access-Control-Allow-Origin","*");h.set("Access-Control-Allow-Methods","GET, OPTIONS");h.set("Access-Control-Allow-Headers","Content-Type, Accept");
  return new Response(status===204?null:body,{status,headers:h});
 }
+
+const NUE_POOL_PREFIX="wtbd:nue-pool:v1:";
+const poolKey=d=>NUE_POOL_PREFIX+d;
+const dayISO=d=>d.toISOString().slice(0,10);
+function poolRows(p){if(Array.isArray(p))return p;for(const k of ["overflights","aircraft","results","items","ac"])if(Array.isArray(p?.[k]))return p[k];return [];}
+function poolHex(r){return String(r?.icao||r?.hex||r?.hex_id||r?.icao24||"").toLowerCase();}
+function poolType(r){return String(r?.t||r?.type||r?.aircraft_type||r?.icao_type||"").toUpperCase();}
+function poolTime(r){const v=r?.closest_time??r?.timestamp??r?.time??r?.seen;if(typeof v==="number")return new Date(v<1e12?v*1000:v).toISOString();const d=new Date(v);return Number.isFinite(d.getTime())?d.toISOString():null;}
+async function poolFetch(env,from,to){
+ const url="https://api.flyitalyadsb.com/v2/overflights?lat=49.4987&lon=11.0780&dist=10&from="+encodeURIComponent(from.toISOString())+"&to="+encodeURIComponent(to.toISOString());
+ const r=await fetch(url,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/14.0"}});
+ const body=await r.text();if(!r.ok)throw new Error("FlyItalyADSB HTTP "+r.status+" "+body.slice(0,120));
+ return poolRows(JSON.parse(body));
+}
+async function updatePool(env,day,from,to,mode){
+ if(!env.AIRCRAFT_POOL||!env.FLYITALYADSB_API_KEY)throw new Error("AIRCRAFT_POOL KV or FlyItalyADSB key missing");
+ const key=poolKey(day),old=await env.AIRCRAFT_POOL.get(key,"json")||{airport:"NUE",date:day,aircraft:{},observations:[]};
+ const aircraft=old.aircraft||{},obs=old.observations||[];let accepted=0;
+ for(const r of await poolFetch(env,from,to)){
+  const hex=poolHex(r),type=poolType(r),time=poolTime(r);
+  if(!/^[0-9a-f]{6}$/.test(hex)||!["B738","B38M"].includes(type)||!time)continue;
+  const x=aircraft[hex]||{hex,firstSeen:time,observations:0};
+  x.type=type;x.registration=r.r||r.registration||x.registration||null;x.lastSeen=time;x.observations++;x.evidence="NUE-area ADS-B observation only; not proof of landing, basing or flight assignment";
+  aircraft[hex]=x;obs.push({hex,type,time,registration:x.registration});accepted++;
+ }
+ const unique=[...new Map(obs.slice(-5000).map(x=>[x.hex+"|"+x.time,x])).values()];
+ const value={airport:"NUE",date:day,updatedAt:new Date().toISOString(),mode,source:"FlyItalyADSB · 10 km NUE area",aircraft,aircraftCount:Object.keys(aircraft).length,observationCount:unique.length,observations:unique,limitations:["Area observation does not prove landing, takeoff, basing or flight assignment.","Only B738/B38M observations are retained.","Coverage gaps are possible."]};
+ await env.AIRCRAFT_POOL.put(key,JSON.stringify(value),{expirationTtl:259200});
+ return {accepted,aircraftCount:value.aircraftCount};
+}
+async function refreshPool(event,env){
+ if(!env.AIRCRAFT_POOL||!env.FLYITALYADSB_API_KEY)return;
+ const now=new Date(event.scheduledTime||Date.now()),today=dayISO(now);
+ if(event.cron==="15 3 * * *"){
+  const start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-1)),day=dayISO(start);
+  await env.AIRCRAFT_POOL.delete(poolKey(day));
+  for(let h=0;h<24;h+=6){const from=new Date(start.getTime()+h*3600000),to=new Date(from.getTime()+6*3600000-1000);await updatePool(env,day,from,to,"daily-rebuild");}
+ }
+ const to=new Date(now.getTime()-60000),from=new Date(to.getTime()-6*3600000);
+ await updatePool(env,today,from,to,"rolling-update");
+}
+
 export default {
+ async scheduled(event,env,ctx){ctx.waitUntil(refreshPool(event,env).catch(e=>console.error("NUE pool refresh failed",e)));},
  async fetch(request,env){
   if(request.method==="OPTIONS")return cors(null,204);
   const u=new URL(request.url);
   try{
+
+   if(u.pathname==="/api/pool"){
+    const date=u.searchParams.get("date")||new Date().toISOString().slice(0,10);
+    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
+    if(!env.AIRCRAFT_POOL)return cors(JSON.stringify({error:"AIRCRAFT_POOL KV binding is not configured"}),503,{"Content-Type":"application/json"});
+    const pool=await env.AIRCRAFT_POOL.get(poolKey(date),"json");
+    return cors(JSON.stringify(pool||{airport:"NUE",date,aircraft:{},aircraftCount:0,limitations:["No pool stored for this date yet."]}),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
+   }
    if(u.pathname==="/api/schedule"){
     const origin=(u.searchParams.get("origin")||"").toUpperCase(),destination=(u.searchParams.get("destination")||"").toUpperCase(),date=u.searchParams.get("date")||"";
     if(!/^[A-Z]{3}$/.test(origin)||!/^[A-Z]{3}$/.test(destination)||!(origin==="NUE"||destination==="NUE")||!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid schedule parameters; every tracked route must touch NUE and include a date."}),400,{"Content-Type":"application/json"});
