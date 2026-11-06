@@ -165,7 +165,8 @@ async function refreshPool(event,env){
   await env.AIRCRAFT_POOL.delete(poolKey(day));
   for(let h=0;h<24;h+=6){const from=new Date(start.getTime()+h*3600000),to=new Date(from.getTime()+6*3600000-1000);await updatePool(env,day,from,to,"daily-rebuild");}
  }
- // The current day is published with roughly a 10-minute delay.\n  const to=new Date(now.getTime()-12*60000),from=new Date(to.getTime()-6*3600000);
+ // The current day is published with roughly a 10-minute delay.
+  const to=new Date(now.getTime()-12*60000),from=new Date(to.getTime()-6*3600000);
  await updatePool(env,today,from,to,"rolling-update");
 }
 
@@ -191,7 +192,8 @@ export default {
       await env.AIRCRAFT_POOL.put(lockKey,"1",{expirationTtl:120});
       try{
        if(!env.FLYITALYADSB_API_KEY)throw new Error("FLYITALYADSB_API_KEY secret is missing");
-       // FlyItalyADSB current-day overflights are complete only to about 10 minutes ago; leave a 12-minute safety margin.\n        const to=new Date(Date.now()-12*60000),from=new Date(to.getTime()-6*3600000);
+       // FlyItalyADSB current-day overflights are complete only to about 10 minutes ago; leave a 12-minute safety margin.
+        const to=new Date(Date.now()-12*60000),from=new Date(to.getTime()-6*3600000);
        await updatePool(env,date,from,to,forceRefresh?"manual-refresh":"on-demand-bootstrap");
        pool=await env.AIRCRAFT_POOL.get(poolKey(date),"json");
       }catch(e){
