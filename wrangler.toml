@@ -3,5 +3,9 @@ main = "worker.js"
 compatibility_date = "2026-11-06"
 workers_dev = true
 
+[[kv_namespaces]]
+binding = "AIRCRAFT_POOL"
+id = "511ed24e55fb465db2a78da106bedbe5"
+
 [triggers]
 crons = ["15 3 * * *", "15 */4 * * *"]
