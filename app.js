@@ -294,14 +294,14 @@
       const track=numeric(ac.track);
       const headingDifference=track===null ? null : angleDiff(track,routeBearing);
       if (headingDifference!==null && headingDifference>75 && !compatibility.callMatch && !compatibility.groupCall && !compatibility.operatorMatch) continue;
-      // Unknown-operator 737s need a very tight positional, timing and heading match.
-      if (!compatibility.callMatch && !compatibility.groupCall && !compatibility.operatorMatch) {
-        if (geo.crossTrack > 28 || progressDifference > 0.18 || seen > 25 || (headingDifference !== null && headingDifference > 35)) continue;
-      }
       const onGround=ac.alt_baro === "ground";
       const altitude=onGround ? null : numeric(ac.alt_baro);
       const seen=numeric(ac.seen) ?? 999;
       const progressDifference=Math.abs(fraction-expectedFraction);
+      // Unknown-operator 737s need a very tight positional, timing and heading match.
+      if (!compatibility.callMatch && !compatibility.groupCall && !compatibility.operatorMatch) {
+        if (geo.crossTrack > 28 || progressDifference > 0.18 || seen > 25 || (headingDifference !== null && headingDifference > 35)) continue;
+      }
       const headingScore=headingDifference===null?0:headingDifference<35?18:headingDifference<65?10:headingDifference<90?2:-12;
       const callScore=compatibility.callMatch?55:compatibility.groupCall?42:compatibility.operatorMatch?48:0;
       const typeScore=compatibility.typeMatch?18:0;
