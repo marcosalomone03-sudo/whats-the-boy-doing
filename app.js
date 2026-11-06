@@ -114,7 +114,7 @@
     return data;
   }
 
-  function makeFlight(origin,destination,number,dep,arr,date,arrivalDate) {
+  function makeFlight(origin,destination,number,dep,arr,date,arrivalDate,estimated={}) {
     const depTime = dateAtAirport(date,dep,airport(origin));
     let arrDate = arrivalDate || date;
     let arrTime = dateAtAirport(arrDate,arr,airport(destination));
@@ -122,7 +122,20 @@
       arrDate = addCalendarDay(arrDate);
       arrTime = dateAtAirport(arrDate,arr,airport(destination));
     }
-    return {origin,destination,flightNumber:String(number).replace(/\s/g,"").toUpperCase(),date,departureLocal:dep,arrivalLocal:arr,departure:depTime,arrival:arrTime,routeScan:false};
+    return {origin,destination,flightNumber:String(number).replace(/\s/g,"").toUpperCase(),date,departureLocal:dep,arrivalLocal:arr,departure:depTime,arrival:arrTime,departureEstimated:!!estimated.departure,arrivalEstimated:!!estimated.arrival,routeScan:false};
+  }
+  function estimateBoardTimes(origin,destination,date,boardTime,boardType) {
+    const durationMinutes=Math.max(40,Math.round(hav(airport(origin),airport(destination))/430*60+35));
+    if(boardType==="departure"){
+      const departure=dateAtAirport(date,boardTime,airport(origin));
+      const arrival=new Date(departure.getTime()+durationMinutes*60000);
+      const p=localParts(arrival,airport(destination).tz);
+      return {dep:boardTime,arr:String(p.hour)+":"+String(p.minute),depDate:date,arrDate:String(p.year)+"-"+String(p.month)+"-"+String(p.day),estimated:{departure:false,arrival:true}};
+    }
+    const arrival=dateAtAirport(date,boardTime,airport(destination));
+    const departure=new Date(arrival.getTime()-durationMinutes*60000);
+    const p=localParts(departure,airport(origin).tz);
+    return {dep:String(p.hour)+":"+String(p.minute),arr:boardTime,depDate:String(p.year)+"-"+String(p.month)+"-"+String(p.day),arrDate:date,estimated:{departure:true,arrival:false}};
   }
   function normalizeSchedule(data,origin,destination,date) {
     const out = [];
@@ -145,13 +158,20 @@
           : Number(dayValue) === Number(date.slice(-2));
         if (!matchesDate) continue;
         for (const item of (Array.isArray(day.flights) ? day.flights : [])) {
-          const dep = timePart(item.departureTime || item.departureLocalTime || item.departureDateTime);
-          const arr = timePart(item.arrivalTime || item.arrivalLocalTime || item.arrivalDateTime);
+          let dep = timePart(item.departureTime || item.departureLocalTime || item.departureDateTime);
+          let arr = timePart(item.arrivalTime || item.arrivalLocalTime || item.arrivalDateTime);
           const no = flightNo(item.flightNumber || item.number || item.flightNo,item.carrierCode);
-          if (!dep || !arr || !no) continue;
-          const arrDate = item.arrivalDateTime && String(item.arrivalDateTime).includes("T")
+          let depDate = item.departureDateTime && String(item.departureDateTime).includes("T")
+            ? String(item.departureDateTime).slice(0,10) : date;
+          let arrDate = item.arrivalDateTime && String(item.arrivalDateTime).includes("T")
             ? String(item.arrivalDateTime).slice(0,10) : undefined;
-          out.push(makeFlight(origin,destination,no,dep,arr,date,arrDate));
+          let estimated = {};
+          if ((!dep || !arr) && item.boardType && item.boardTime) {
+            const times=estimateBoardTimes(origin,destination,item.boardDate||date,timePart(item.boardTime),item.boardType);
+            dep=times.dep; arr=times.arr; depDate=times.depDate; arrDate=times.arrDate; estimated=times.estimated;
+          }
+          if (!dep || !arr || !no) continue;
+          out.push(makeFlight(origin,destination,no,dep,arr,depDate,arrDate,estimated));
         }
       }
     }
@@ -341,10 +361,10 @@
   }
   function render() {
     const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();
-    $("sectors").innerHTML=flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)}</small></div><div class="time">${fmt(f.departure,airport(f.origin).tz)}<small>arr ${fmt(f.arrival,airport(f.destination).tz)}</small></div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`;
+    $("sectors").innerHTML=flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)}${f.departureEstimated||f.arrivalEstimated?" · airport board / estimated time":""}</small></div><div class="time">${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>arr ${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</small></div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`;
     $("sectorCount").textContent=flights.length+" SECTORS";
     const next=flights.find(f=>f.departure>now);
-    $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>Scheduled departure</small><strong>${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>Scheduled arrival</small><strong>${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
+    $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
     $("current").innerHTML=state.selected?renderAircraft(state.selected.flight,state.selected.aircraft):`<div class="empty">No aircraft confirmed yet. Select a candidate below.</div>`;
     const last=storageGet();
     $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST SELECTED</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
@@ -361,7 +381,7 @@
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
-      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${esc(dep)} (${esc(f.origin)}) · ARR ${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} MATCH</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.callMatch?" · flight callsign matched":ac.groupCall?" · Ryanair-group callsign":ac.operatorMatch?" · operator verified":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
+      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} MATCH</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.callMatch?" · flight callsign matched":ac.groupCall?" · Ryanair-group callsign":ac.operatorMatch?" · operator verified":""}${f.departureEstimated||f.arrivalEstimated?" · one time estimated from airport board":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
     }).join("");
     el.querySelectorAll("[data-pick]").forEach(button=>button.addEventListener("click",()=>{
       const item=items[Number(button.dataset.pick)]; if(!item)return;
