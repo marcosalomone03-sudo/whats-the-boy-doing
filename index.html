@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071421">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="What's the boy doing?">
+  <meta name="description" content="A free personal flight-day tracker using public flight schedule and ADS-B data.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <title>What's the boy doing?</title>
+  <style>
+    :root{color-scheme:dark;--bg:#06111c;--panel:#0d1d2b;--panel2:#102638;--line:#20384b;--text:#eef6fc;--muted:#91a8ba;--cyan:#59d7f5;--green:#61e2a2;--amber:#ffca70;--red:#ff7d86}
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(1000px 600px at 80% -10%,#12324a 0%,transparent 55%),var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom))}
+    .app{max-width:720px;margin:0 auto}
+    header{display:flex;align-items:center;justify-content:space-between;padding:22px 2px 18px}
+    .brand{display:flex;gap:12px;align-items:center}.mark{width:42px;height:42px;border-radius:13px;background:linear-gradient(145deg,#1d6887,#123348);display:grid;place-items:center;border:1px solid #36718a;font-size:21px}
+    h1{font-size:18px;line-height:1.1;margin:0;font-weight:800;letter-spacing:.1px}.sub{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:1.5px;text-transform:uppercase}
+    .pill{border:1px solid var(--line);border-radius:99px;padding:6px 10px;color:var(--muted);font-size:11px;white-space:nowrap}
+    .hero{background:linear-gradient(145deg,#102b40,#0b1b29 72%);border:1px solid #23465e;border-radius:22px;padding:18px;box-shadow:0 18px 50px #0004}
+    .eyebrow{color:var(--cyan);font-size:10px;letter-spacing:1.8px;font-weight:800;text-transform:uppercase}
+    .formrow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+    label{display:block;color:var(--muted);font-size:11px;margin:0 0 6px 2px}
+    input{width:100%;border:1px solid #2b4a60;background:#071723;color:var(--text);padding:14px 13px;border-radius:12px;font-size:16px;outline:none}
+    input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #59d7f522}
+    input.code{text-transform:uppercase;letter-spacing:2px;font-weight:800}
+    .hint{color:var(--muted);font-size:11px;margin:8px 2px 0}
+    button{border:0;border-radius:12px;padding:14px 16px;font-weight:800;font-size:14px;cursor:pointer}
+    .primary{width:100%;margin-top:14px;background:linear-gradient(90deg,#43c7e8,#68e3c1);color:#05202b}
+    .secondary{background:#142b3d;border:1px solid #29465c;color:var(--text);padding:10px 13px;font-size:12px}
+    button:disabled{opacity:.5;cursor:wait}
+    .statusline{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;margin-top:12px}
+    .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px #61e2a2aa}
+    .section{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px}
+    .sectionhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    h2{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;margin:0;color:#c6d8e5}
+    .muted{color:var(--muted)}
+    .empty{padding:22px 10px;text-align:center;color:var(--muted);font-size:13px}
+    .flighttop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+    .flightno{font-size:25px;font-weight:850;letter-spacing:.3px}
+    .route{font-size:20px;font-weight:750;margin-top:3px}
+    .status{font-size:10px;font-weight:800;letter-spacing:1px;padding:6px 9px;border-radius:99px;border:1px solid}
+    .status.air{color:var(--green);border-color:#286e55;background:#123b31}.status.ground{color:var(--amber);border-color:#775a2a;background:#3a2c16}.status.none{color:var(--muted);border-color:#34495b;background:#142535}
+    .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-top:15px}
+    .stat{background:#091925;border:1px solid #1c3548;border-radius:12px;padding:11px}
+    .stat small{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+    .stat strong{display:block;font-size:17px;margin-top:4px;font-weight:750;overflow-wrap:anywhere}
+    .flightlist{display:flex;flex-direction:column;gap:8px}
+    .flightrow{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:11px 12px;background:#091925;border:1px solid #1d3547;border-radius:12px}
+    .flightrow b{display:block;font-size:13px}.flightrow small{display:block;color:var(--muted);font-size:10px;margin-top:3px}
+    .time{text-align:right;font-variant-numeric:tabular-nums;font-weight:750;font-size:14px;white-space:nowrap}
+    .notice{font-size:11px;color:var(--muted);line-height:1.5;margin-top:12px}
+    .error{color:#ff9ba2;background:#381d27;border:1px solid #713543;border-radius:12px;padding:11px;font-size:12px;margin-top:12px;display:none;white-space:pre-wrap}
+    .footer{color:#617b8e;text-align:center;font-size:10px;padding:22px 8px 4px}
+    .source{display:inline-block;color:#7f9eb3;text-decoration:underline;text-underline-offset:3px;margin-right:10px}
+    @media(min-width:600px){.stats{grid-template-columns:repeat(4,1fr)}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><div class="mark">✈</div><div><h1>What's the boy doing?</h1><div class="sub">Personal flight operations tracker</div></div></div>
+    <div class="pill">FREE · BETA</div>
+  </header>
+
+  <section class="hero">
+    <div class="eyebrow">Your duty, decoded</div>
+    <div class="formrow">
+      <div><label for="route">DUTY ROUTE</label><input id="route" class="code" maxlength="7" value="BUD-ALC" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BUD-ALC"></div>
+      <div><label for="flightDate">DUTY DATE</label><input id="flightDate" type="date"></div>
+    </div>
+    <div class="hint">Enter one airport (BUD) or two (BUD-ALC). NUE is added automatically.</div>
+    <button id="track" class="primary">TRACK MY DUTY <span aria-hidden="true">↗</span></button>
+    <div class="statusline"><span class="dot"></span><span id="connection">Ready · internet connection required</span></div>
+    <div id="error" class="error"></div>
+  </section>
+
+  <section class="section" id="currentSection">
+    <div class="sectionhead"><h2>Current flight</h2><span class="pill" id="lastUpdated">NOT STARTED</span></div>
+    <div id="current" class="empty">Enter your duty route and tap Track My Duty.</div>
+  </section>
+
+  <section class="section">
+    <div class="sectionhead"><h2>Last completed flight</h2><span class="pill">THIS DEVICE</span></div>
+    <div id="lastFlight" class="empty">No completed flight saved on this device yet.</div>
+  </section>
+
+  <section class="section">
+    <div class="sectionhead"><h2>Next takeoff</h2><span class="pill">SCHEDULED</span></div>
+    <div id="nextFlight" class="empty">The next scheduled sector will appear here.</div>
+  </section>
+
+  <section class="section">
+    <div class="sectionhead"><h2>Duty sectors</h2><span class="pill" id="sectorCount">0 SECTORS</span></div>
+    <div id="sectors" class="flightlist"><div class="empty">No timetable loaded.</div></div>
+    <div class="notice">Scheduled times are local to each airport. Actual times and aircraft details are shown only when supported by live ADS-B observations. Missing data is never replaced with invented values.</div>
+  </section>
+
+  <div class="footer">
+    <a class="source" href="https://api.adsb.lol/docs" target="_blank" rel="noopener">ADSB.lol API</a>
+    <a class="source" href="https://www.ryanair.com" target="_blank" rel="noopener">Ryanair schedules</a>
+    <div style="margin-top:8px">Independent personal tool · Not affiliated with Ryanair</div>
+  </div>
+</div>
+<script src="./app.js"></script>
+</body>
+</html>
