@@ -288,7 +288,18 @@
     });
     el.textContent=lines.join("\n\n")+"\n\nUnique aircraft are deduplicated by ICAO HEX. Airport labels identify the exact airport checked. An airport observation alone does not confirm a flight assignment; callsigns are not used to match flights."+(message?"\n\n"+message:"");
   }
-    function observedAircraftCandidates() {
+    function turnaroundEvidence(flight,hex) {
+    const airportCode=flight.origin;
+    const previous=state.flights.filter(f=>f!==flight&&f.destination===airportCode&&f.date===flight.date&&f.arrival<=flight.departure).sort((a,b)=>b.arrival-a.arrival)[0];
+    if(!previous)return null;
+    const timeOf=item=>{const value=item?.closest_time;const ms=typeof value==="number"?(value<1e12?value*1000:value):Date.parse(value);return Number.isFinite(ms)?ms:null;};
+    const records=state.observed.filter(item=>String(item.icao||item.hex||"").toLowerCase()===String(hex).toLowerCase());
+    const arrivals=records.filter(item=>item.checkpoint==="arrival"&&item.flight?.flightNumber===previous.flightNumber&&item.flight?.origin===previous.origin&&item.flight?.destination===previous.destination).map(item=>({item,time:timeOf(item)})).filter(x=>x.time!==null&&Math.abs(x.time-previous.arrival.getTime())<=90*60000);
+    const departures=records.filter(item=>item.checkpoint==="departure"&&item.flight?.flightNumber===flight.flightNumber&&item.flight?.origin===flight.origin&&item.flight?.destination===flight.destination).map(item=>({item,time:timeOf(item)})).filter(x=>x.time!==null&&Math.abs(x.time-flight.departure.getTime())<=90*60000);
+    for(const arrival of arrivals)for(const departure of departures){const gap=(departure.time-arrival.time)/60000;if(gap>=0&&gap<=180)return {inboundFlight:previous.flightNumber,arrivalTime:new Date(arrival.time).toISOString(),departureTime:new Date(departure.time).toISOString(),gapMinutes:Math.round(gap)};}
+    return null;
+  }
+  function observedAircraftCandidates() {
     // Build a flight-specific evidence group first, then deduplicate globally by HEX.
     const byFlight=new Map();
     for(const item of state.observed) {
@@ -523,7 +534,8 @@
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
-      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · aircraft registry identifies Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}`;
+      const continuity=ac.turnaroundEvidence?" · TURNAROUND CONTINUITY OBSERVED: same HEX at "+esc(ac.turnaroundEvidence.inboundFlight)+" arrival and "+esc(f.flightNumber)+" departure at "+esc(f.origin)+" ("+ac.turnaroundEvidence.gapMinutes+" min between observations)":" · NO VERIFIED TURNAROUND LINK";
+      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · aircraft registry identifies Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}`+continuity;
       const action=historical?"":`<button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button>`;
       return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} · NOT VERIFIED</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · OWNER ${esc(ac.operatorName||"Ryanair Group registry match")} · ${evidence}${historical?" · NOT AIRLINE-CONFIRMED":""}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small>${action}</div>`;
     }).join("");
@@ -595,6 +607,9 @@
         if (scheduleErrors.length) showError(scheduleErrors.join("\\n"));
         return;
       }
+      // Collect airport observations before ranking. Same-HEX continuity is supporting evidence only.
+      $("connection").textContent="Timetable loaded · checking airport observations and live ADS-B…";
+      await loadObserved(date);
       $("connection").textContent="Timetable loaded · filtering current ADS-B traffic…";
       const all=[]; const adsbErrors=[];
       const found=await Promise.allSettled(searchFlights.map(f=>findCandidates(f)));
@@ -603,10 +618,12 @@
       const unique=new Map();
       for (const item of all) {
         const key=String(item.aircraft.hex).toLowerCase();
+        item.aircraft.turnaroundEvidence=turnaroundEvidence(item.flight,key);
         const old=unique.get(key);
-        if(!old||item.aircraft.score>old.aircraft.score)unique.set(key,item);
+        const rank=(x)=>(x.aircraft.turnaroundEvidence?100000:0)+x.aircraft.score;
+        if(!old||rank(item)>rank(old))unique.set(key,item);
       }
-      const final=[...unique.values()].sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,6);
+      const final=[...unique.values()].sort((a,b)=>(b.aircraft.turnaroundEvidence?1:0)-(a.aircraft.turnaroundEvidence?1:0)||b.aircraft.score-a.aircraft.score).slice(0,6);
       state.candidates=final;
       renderCandidates(final,final.length?"Live ADS-B candidates only. Filtered to B738/B38M and checked against aircraft registry ownership. Position and route fit are not airline confirmation.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft passed both the Ryanair Group operator and B738/B38M filters.");
       // Never silently restore a previously selected aircraft after a fresh search.
