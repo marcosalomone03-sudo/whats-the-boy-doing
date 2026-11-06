@@ -4,4 +4,4 @@ compatibility_date = "2026-11-06"
 workers_dev = true
 
 [triggers]
-crons = ["15 3 * * *", "15 */2 * * *"]
+crons = ["15 3 * * *", "15 */4 * * *"]
