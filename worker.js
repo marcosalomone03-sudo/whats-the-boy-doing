@@ -2,6 +2,7 @@
  * What's the boy doing? — free API bridge
  * Deploy as a Cloudflare Worker. No API key is used.
  * Routes:
+ * Deployment pipeline: GitHub Actions publishes this Worker to Cloudflare.
  *   /api/schedule?origin=NUE&destination=BUD&year=2026&month=11
  *   /api/aircraft?lat=49.4987&lon=11.078&dist=35
  *   /api/hex?icao=4CA123
