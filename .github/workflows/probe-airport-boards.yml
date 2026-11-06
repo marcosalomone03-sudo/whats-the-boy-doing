@@ -15,61 +15,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Inspect public airport board responses and their data scripts
+      - name: Inspect public airport board data endpoints
         run: |
           node --input-type=module <<'NODE'
-          const headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; WTBD-AirportBoardProbe/1.0)",
-            "Accept": "text/html,application/xhtml+xml,application/javascript,application/json;q=0.9,*/*;q=0.8"
-          };
-          const targets = [
-            ["AENA-ALC", "https://www.aena.es/en/flight-info.html?iata=ALC"],
-            ["AENA-PMO", "https://www.aena.es/en/flight-info.html?iata=PMO"],
-            ["AENA-AGP", "https://www.aena.es/en/flight-info.html?iata=AGP"],
-            ["BUD-DEPARTURES", "https://www.bud.hu/en/departures"],
-            ["BUD-ARRIVALS", "https://www.bud.hu/en/arrivals"],
-            ["STN-DEPARTURES", "https://www.stanstedairport.co.uk/departures/"],
-            ["STN-ARRIVALS", "https://www.stanstedairport.co.uk/arrivals/"],
-            ["NUE-FLIGHT-STATUS", "https://www.airport-nuernberg.de/en/flight-status"]
-          ];
-          const scripts = new Map();
-          for (const [name, url] of targets) {
-            try {
-              const response = await fetch(url, { headers, redirect: "follow", signal: AbortSignal.timeout(20000) });
-              const html = await response.text();
-              const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim() || "";
-              const srcs = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m => new URL(m[1], response.url).href);
-              for (const src of srcs) if (/infovuelos|flightStore|Information-|configs\.js|index\..*\.js|_next\/static\/chunks/i.test(src)) scripts.set(src, name);
-              console.log("\n### "+name);
-              console.log("HTTP", response.status, "URL", response.url, "BYTES", html.length, "TITLE", title);
-              console.log("SCRIPT CANDIDATES", JSON.stringify(srcs.filter(s => /infovuelos|flightStore|Information-|configs\.js|index\..*\.js|_next\/static\/chunks/i.test(s))));
-              console.log("HTML HAS NEXT DATA", html.includes("__NEXT_DATA__"), "HAS FLIGHT TERMS", /flight.?number|flight.?time|departure|arrival/i.test(html));
-            } catch (error) { console.log("\n### "+name+" ERROR "+String(error)); }
-          }
-          const extras = [
-            "https://www.bud.hu/js/configs.js",
-            "https://www.bud.hu/build/assets/flightStore-BjT5Sp9I.js",
-            "https://www.bud.hu/build/assets/Information-BsEPmhrj.js",
-            "https://www.aena.es/publica/assets/js/applications/infovuelos/infovuelos.main.chunk.js?v=1.34",
-            "https://www.airport-nuernberg.de/assets/index.ad3000b20012b9ee.js"
-          ];
-          for (const [url, name] of [...scripts.entries()].concat(extras.map(u=>[u,"EXTRA"]))) {
-            try {
-              const response = await fetch(url,{headers,redirect:"follow",signal:AbortSignal.timeout(20000)});
-              const body = await response.text();
-              const hints = [...new Set([
-                ...(body.match(/https?:\/\/[A-Za-z0-9._:-]+(?:\/[A-Za-z0-9._~!$&'()*+,;=:@%-]*)?/g)||[]),
-                ...(body.match(/\/(?:api|v\d|flight|flights|departures|arrivals)[A-Za-z0-9_./?=&%-]*/gi)||[])
-              ])].filter(x=>/api|flight|depart|arriv|airport|aena|azure|scrivito|mag/i.test(x)).slice(0,60);
-              const snippets=[];
-              for(const term of ["flightStore","flightNumber","flight_number","departure","arrivals","/flights","apiUrl","baseURL","fetch(","axios","scrivito","flight-info"]){
-                const i=body.toLowerCase().indexOf(term.toLowerCase());
-                if(i>=0)snippets.push(term+": "+body.slice(Math.max(0,i-180),Math.min(body.length,i+350)).replace(/\s+/g," "));
-              }
-              console.log("\n### SCRIPT",name,url);
-              console.log("HTTP",response.status,"BYTES",body.length,"TYPE",response.headers.get("content-type"));
-              console.log("HINTS",JSON.stringify(hints));
-              console.log("SNIPPETS",JSON.stringify(snippets.slice(0,10)));
-            } catch(error){console.log("\n### SCRIPT ERROR",url,String(error));}
-          }
+          const headers={"User-Agent":"Mozilla/5.0 (compatible; WTBD-AirportBoardProbe/1.0)","Accept":"application/json,text/html,application/javascript,*/*"};
+          async function get(url){const r=await fetch(url,{headers,redirect:"follow",signal:AbortSignal.timeout(20000)});const t=await r.text();console.log("\nURL",url,"\nHTTP",r.status,"FINAL",r.url,"TYPE",r.headers.get("content-type"),"BYTES",t.length,"\nBODY",t.slice(0,7000));return t;}
+          const aena=await get("https://www.aena.es/publica/assets/js/applications/infovuelos/infovuelos.main.chunk.js?v=1.34");
+          for(const term of ["wpadesnueva","getDefaultAirport","ListaAeropuertosAena","sendParentDataAeropuertosAena","fetch(","axios","api/","AeropuertoProp"]){let p=-1,n=0;while((p=aena.toLowerCase().indexOf(term.toLowerCase(),p+1))>=0&&n++<5)console.log("\nAENA",term,aena.slice(Math.max(0,p-500),Math.min(aena.length,p+1000)));}
+          const bud=await get("https://www.bud.hu/build/assets/app-CYMcx8Ka.js");
+          for(const term of ["app-prod-bud","flight.search","flightSearch","flight-search","route:function","window.route","baseURL","axios.create"]){let p=-1,n=0;while((p=bud.toLowerCase().indexOf(term.toLowerCase(),p+1))>=0&&n++<4)console.log("\nBUD",term,bud.slice(Math.max(0,p-400),Math.min(bud.length,p+900)));}
+          const stnPage=await get("https://www.stanstedairport.co.uk/departures/");
+          for(const term of ["FR4208","__NEXT_DATA__","flightNumber","flightTime","departure","flightStatus","api/"]){let p=-1,n=0;while((p=stnPage.toLowerCase().indexOf(term.toLowerCase(),p+1))>=0&&n++<3)console.log("\nSTN HTML",term,stnPage.slice(Math.max(0,p-250),Math.min(stnPage.length,p+700)));}
+          for(const url of [
+            "https://www.airport-nuernberg.de/api/flight-status/departures?lang=en&airportIata=NUE&date=20261106",
+            "https://www.airport-nuernberg.de/api/flight-status/arrivals?lang=en&airportIata=NUE&date=20261106",
+            "https://www.bud.hu/flight-search/quick",
+            "https://app-prod-bud-web-brata3fggtb9dacx.northeurope-01.azurewebsites.net"
+          ]){try{await get(url)}catch(e){console.log("\nPROBE ERROR",url,String(e))}}
           NODE
