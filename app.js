@@ -75,9 +75,10 @@
   function routesFor(value) {
     const parts = value.split("-");
     if (parts.length === 1) return [["NUE",parts[0]],[parts[0],"NUE"]];
-    // If NUE is explicitly entered, treat the input as one exact route.
-    // Two non-NUE codes are destination shortcuts and expand in both directions.
-    if (parts.includes("NUE")) return [[parts[0],parts[1]]];
+    // Always inspect both directions, including an explicitly entered NUE route.
+    // The aircraft may be operating the inbound leg now, or the outbound leg
+    // after arriving at NUE on the preceding sector.
+    if (parts.includes("NUE")) return [[parts[0],parts[1]],[parts[1],parts[0]]];
     return [["NUE",parts[0]],[parts[0],"NUE"],["NUE",parts[1]],[parts[1],"NUE"]];
   }
   function numeric(value) {
