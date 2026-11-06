@@ -1,4 +1,4 @@
-name: Probe official airport flight boards
+name: Probe official NUE board frontend
 
 on:
   push:
@@ -15,16 +15,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Test Nuremberg official flight plan feed
+      - name: Inspect live Nuremberg board frontend
         run: |
           node --input-type=module <<'NODE'
-          const h={"User-Agent":"Mozilla/5.0 (compatible; WTBD/1.0)","Accept":"application/json,*/*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"};
-          for(const url of [
-            "https://airportnue-service.justrelate.io/production/api/flight-plan?lang=en&airports=NUE&dateRanges=20261106:20261106",
-            "https://airportnue-service.justrelate.io/production/api/flight-plan?lang=en&airports=NUE&dateRanges=2026-11-06:2026-11-06",
-            "https://airportnue-service.justrelate.io/production/api/flight-plan?lang=en&airports=NUE",
-            "https://airportnue-service.justrelate.io/production/api/flight-status/departures?lang=en&airportIata=NUE"
-          ]){
-            try{const r=await fetch(url,{headers:h,signal:AbortSignal.timeout(20000)});const t=await r.text();console.log("\nURL",url,"HTTP",r.status,"TYPE",r.headers.get("content-type"),"BYTES",t.length,"BODY",t.slice(0,7000));try{const j=JSON.parse(t);console.log("JSON SHAPE",Array.isArray(j)?"array "+j.length:Object.keys(j||{}),"FIRST",Array.isArray(j)?j.slice(0,3):j);}catch{}}catch(e){console.log("ERROR",url,String(e));}
+          const headers={"User-Agent":"Mozilla/5.0","Accept":"text/html,application/xhtml+xml,*/*"};
+          const url="https://www.airport-nuernberg.de/en/flight-status";
+          const r=await fetch(url,{headers,redirect:"follow"});const html=await r.text();
+          console.log("PAGE",r.status,r.url,"bytes",html.length);
+          const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m=>new URL(m[1],r.url).href);
+          console.log("SCRIPTS",JSON.stringify(scripts));
+          console.log("HTML FLIGHT SNIPPETS",html.slice(Math.max(0,html.indexOf("flight-status")-800),html.indexOf("flight-status")+3000));
+          for(const u of scripts){
+           if(!/\.js(\?|$)/.test(u))continue;
+           try{
+            const x=await fetch(u,{headers,redirect:"follow"});const js=await x.text();
+            if(/flight-plan|flight-status|airportnue-service|justrelate|flightStatus|departure|arrival/i.test(js)){
+             console.log("\nJS",u,"HTTP",x.status,"bytes",js.length);
+             for(const term of ["airportnue-service","flight-plan","flight-status","api/","dateRanges","airportIata","departures","arrivals"]){
+              let p=-1,n=0;while((p=js.toLowerCase().indexOf(term.toLowerCase(),p+1))>=0&&n++<4)console.log("MATCH",term,js.slice(Math.max(0,p-400),Math.min(js.length,p+1200)));
+             }
+            }
+           }catch(e){console.log("JSERR",u,String(e))}
           }
           NODE
