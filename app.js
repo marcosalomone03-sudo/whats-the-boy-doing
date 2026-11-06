@@ -543,7 +543,7 @@
         const status=String(f.boardStatus||"").trim();
         const eventTime=actual||f.boardEstimatedTime||"";
         let deltaText="";
-        if(actual&&/^\\d{2}:\\d{2}$/.test(actual)&&/^\\d{2}:\\d{2}$/.test(scheduled)){
+        if(actual&&/^\d{2}:\d{2}$/.test(actual)&&/^\d{2}:\d{2}$/.test(scheduled)){
           const toMin=x=>Number(x.slice(0,2))*60+Number(x.slice(3,5));
           let delta=toMin(actual)-toMin(scheduled);
           if(delta>720)delta-=1440;if(delta< -720)delta+=1440;
