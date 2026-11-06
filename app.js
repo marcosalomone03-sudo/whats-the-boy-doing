@@ -260,23 +260,22 @@
   function normalizedCallsign(value) {
     return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   }
-  // Some flights are broadcast with an operational callsign that does not
-  // contain the public flight number. Keep confirmed exceptions explicit.
-  const KNOWN_CALLSIGN_ALIASES = {
-    FR1130: ["RYR5RH"]
-  };
-  function callsignMatchesFlight(value, flightNumber) {
-    const call = normalizedCallsign(value);
-    const flight = String(flightNumber || "").toUpperCase().replace(/\s+/g, "");
-    if (!call || !flight) return false;
-    if ((KNOWN_CALLSIGN_ALIASES[flight] || []).some(alias => normalizedCallsign(alias) === call)) return true;
-    const digits = flight.replace(/^[A-Z]+/, "").replace(/\D/g, "");
-    if (!digits) return false;
-    return RYANAIR_CALLSIGN_PREFIXES.some(prefix => {
-      if (!call.startsWith(prefix)) return false;
-      const suffix = call.slice(prefix.length).replace(/[A-Z]+$/, "");
-      return suffix.replace(/^0+/, "") === digits.replace(/^0+/, "");
-    });
+  // Callsigns are operational identifiers and are NOT derived from public flight numbers.
+  // Do not use them to identify or reject an aircraft for a scheduled flight.
+  function aircraftCompatibility(ac, flight) {
+    const type = String(ac.t || "").toUpperCase();
+    const operator = String(ac.ownOp || ac.operator || "").toLowerCase();
+    const operatorKnown = !!operator;
+    const operatorMatch = /ryanair|malta air|buzz|lauda|ryanair sun|ryanair uk/.test(operator);
+    if (isKnownAirbus(type)) return {ok:false, operatorMatch:false, typeMatch:false, reason:"Airbus excluded"};
+    const typeMatch = RYANAIR_737_TYPES.has(type);
+    // An explicitly different operator is negative evidence. A callsign prefix or suffix
+    // is never used as a flight-number match: Ryanair operational callsigns are independent.
+    if (operatorKnown && !operatorMatch) return {ok:false, operatorMatch:false, typeMatch, reason:"Different operator"};
+    if (!operatorMatch && !typeMatch) {
+      return {ok:false, operatorMatch:false, typeMatch:false, reason:"No compatible aircraft evidence"};
+    }
+    return {ok:true, operatorMatch, typeMatch, operatorKnown};
   }
   function isKnownAirbus(type) {
     const t = String(type || "").toUpperCase();
@@ -369,11 +368,11 @@
       // All aircraft need a plausible progress estimate; exact callsigns cannot override it.
       if (!onGround && progressDifference>0.32 && !nearEndpoint) continue;
       // Unknown-operator 737s need an especially tight positional, timing and heading match.
-      if (!compatibility.callMatch && !compatibility.groupCall && !compatibility.operatorMatch) {
+      if (!compatibility.operatorMatch) {
         if (geo.crossTrack > 28 || progressDifference > 0.18 || seen > 25 || (headingDifference !== null && headingDifference > 35)) continue;
       }
       const headingScore=headingDifference===null?0:headingDifference<35?18:headingDifference<65?10:headingDifference<90?2:-12;
-      const callScore=compatibility.callMatch?55:compatibility.groupCall?42:compatibility.operatorMatch?48:0;
+      const callScore=compatibility.operatorMatch?55:0;
       const typeScore=compatibility.typeMatch?18:0;
       const routeScore=Math.max(0,22-geo.crossTrack/3);
       const progressScore=Math.max(0,18-progressDifference*30);
@@ -382,7 +381,7 @@
       const score=callScore+typeScore+routeScore+progressScore+headingScore+freshnessScore-groundPenalty;
       if (score < 28) continue;
       const confidence=score>=90?"HIGH":score>=60?"MEDIUM":"LOW";
-      candidates.push({...ac,score,confidence,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,routeBearing,headingDifference,altitude,onGround,seenPos,callMatch:compatibility.callMatch,typeMatch:compatibility.typeMatch,expectedFraction});
+      candidates.push({...ac,score,confidence,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,routeBearing,headingDifference,altitude,onGround,seenPos,typeMatch:compatibility.typeMatch,expectedFraction});
     }
     return candidates.sort((a,b)=>b.score-a.score).slice(0,3);
   }
@@ -434,7 +433,7 @@
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
-      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} MATCH</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.callMatch?" · flight callsign matched":ac.groupCall?" · Ryanair-group callsign":ac.operatorMatch?" · operator verified":""} · SOURCE ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
+      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} MATCH</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · operator verified":""} · SOURCE ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
     }).join("");
     el.querySelectorAll("[data-pick]").forEach(button=>button.addEventListener("click",()=>{
       const item=items[Number(button.dataset.pick)]; if(!item)return;
