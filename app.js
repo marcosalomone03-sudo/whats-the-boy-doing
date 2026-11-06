@@ -357,7 +357,7 @@
   async function aircraftNear(point,dist) {
     return get(`/api/aircraft?lat=${encodeURIComponent(point.lat)}&lon=${encodeURIComponent(point.lon)}&dist=${dist}`);
   }
-  // Restrict candidates to the two main Ryanair 737 variants and a known Ryanair Group operator label.
+  // Restrict candidates to the two main Ryanair 737 variants and a known Ryanair Group aircraft registry ownership.
   // Unknown operator metadata is not enough to pass the filter.
   const RYANAIR_737_TYPES = new Set(["B738", "B38M"]);
   const RYANAIR_GROUP_OPERATORS = /ryanair|malta air|buzz|lauda europe|ryanair sun|ryanair uk/;
@@ -374,84 +374,98 @@
     const t = String(type || "").toUpperCase();
     return /^(A318|A319|A320|A321|A20N|A21N|A332|A333|A339|A343|A346|A359|A35K|A388)$/.test(t) || t.startsWith("A32") || t.startsWith("A33") || t.startsWith("A34") || t.startsWith("A35");
   }
+  async function aircraftIdentity(hex) {
+    return get(`/api/identity?icao=${encodeURIComponent(hex)}`);
+  }
+  function ryanairGroupIdentity(identity) {
+    const owner=String(identity?.registeredOwner||identity?.registered_owner||"").toLowerCase();
+    const flag=String(identity?.operatorFlagCode||identity?.operator_flag_code||"").toUpperCase();
+    const ownerMatch=/ryanair|malta air|buzz|ryanair uk|ryanair sun/.test(owner);
+    const flagMatch=new Set(["RYR","RUK","RYS","MAY"]).has(flag);
+    return {ok:ownerMatch||flagMatch,owner:identity?.registeredOwner||identity?.registered_owner||"",flag};
+  }
   async function findCandidates(flight) {
     const origin=airport(flight.origin), destination=airport(flight.destination);
     if (!origin || !destination) throw new Error("Airport coordinates are not available for this route.");
-    const distance=hav(origin,destination);
-    const fractions = distance < 180 ? [0.08,0.35,0.65,0.92] : [0.04,0.22,0.40,0.60,0.78,0.96];
-    const points=fractions.map(f=>interpolate(origin,destination,f));
-    const radius=Math.min(240,Math.max(130,Math.round(distance/6+65)));
-    const results=await Promise.allSettled(points.map(p=>aircraftNear(p,radius)));
-    const map=new Map();
-    const failures=[];
-    for (const result of results) {
-      if (result.status!=="fulfilled") { failures.push(result.reason?.message || "ADS-B request failed"); continue; }
-      for (const ac of (result.value?.ac || [])) {
-        if (!validAircraft(ac)) continue;
-        const old=map.get(ac.hex);
-        if (!old || positionAge(ac)<positionAge(old)) map.set(ac.hex,ac);
+    const now=Date.now(), dep=flight.departure.getTime(), arr=flight.arrival.getTime();
+    if (now < dep-180*60000 || now > arr+30*60000) return [];
+
+    const durationMinutes=Math.max(30,(arr-dep)/60000);
+    const elapsedMinutes=(now-dep)/60000;
+    const expectedFraction=Math.max(0,Math.min(1,elapsedMinutes/durationMinutes));
+    const expectedPoint=interpolate(origin,destination,expectedFraction);
+    // Always inspect the departure area. Once the flight has had time to leave,
+    // also inspect the expected live position and nearby route segments.
+    const requests=[aircraftNear(origin,40)];
+    if(now>dep+8*60000) requests.push(aircraftNear(expectedPoint,105));
+    if(now>dep+8*60000 && expectedFraction>0.18 && expectedFraction<0.82) {
+      requests.push(aircraftNear(interpolate(origin,destination,Math.max(0,expectedFraction-0.16)),95));
+      requests.push(aircraftNear(interpolate(origin,destination,Math.min(1,expectedFraction+0.16)),95));
+    }
+    const results=await Promise.allSettled(requests);
+    const map=new Map(), failures=[];
+    for(const result of results) {
+      if(result.status!=="fulfilled"){failures.push(result.reason?.message||"ADS-B request failed");continue;}
+      for(const ac of (result.value?.ac||[])) {
+        if(!validAircraft(ac)) continue;
+        const hex=String(ac.hex).toLowerCase(),old=map.get(hex);
+        if(!old||positionAge(ac)<positionAge(old)) map.set(hex,ac);
       }
     }
-    if (!map.size && failures.length===results.length) throw new Error(failures[0]);
+    if(!map.size&&failures.length===results.length) throw new Error(failures[0]);
 
-    const now=Date.now();
-    // Never request or reason from future observations. This function only consumes live ADS-B now.
-    if (now < flight.departure.getTime()-180*60000 || now > flight.arrival.getTime()+30*60000) return [];
-    const routeBearing=bearing(origin,destination);
-    const durationMinutes=Math.max(30,(flight.arrival.getTime()-flight.departure.getTime())/60000);
-    const elapsedMinutes=(now-flight.departure.getTime())/60000;
-    const expectedFraction=Math.max(0,Math.min(1,elapsedMinutes/durationMinutes));
-    const candidates=[];
-    for (const ac of map.values()) {
-      const compatibility=aircraftCompatibility(ac);
-      if (!compatibility.ok) continue;
+    const routeBearing=bearing(origin,destination), candidates=[];
+    for(const ac of map.values()) {
+      const type=String(ac.t||"").toUpperCase();
+      if(type!=="B738"&&type!=="B38M") continue;
       const pos={lat:numeric(ac.lat),lon:numeric(ac.lon)};
       const geo=routePosition(origin,destination,pos);
-      if (geo.alongTrack < -35 || geo.alongTrack > geo.distance+35 || geo.crossTrack > 65) continue;
-      const fraction=Math.max(0,Math.min(1,geo.alongTrack/Math.max(1,geo.distance)));
-      const track=numeric(ac.track);
-      const headingDifference=track===null ? null : angleDiff(track,routeBearing);
-      const onGround=ac.alt_baro === "ground";
-      const altitude=onGround ? null : numeric(ac.alt_baro);
-      const seen=numeric(ac.seen) ?? 999;
-      const seenPos=positionAge(ac);
-      const progressDifference=Math.abs(fraction-expectedFraction);
-      const distanceToOrigin=hav(origin,pos);
-      const distanceToDestination=hav(destination,pos);
-      // Callsign is deliberately ignored: it is not a reliable key for a public flight number.
-      // Near either airport, turns and runway alignment make heading less decisive.
-      const nearEndpoint=Math.min(distanceToOrigin,distanceToDestination)<=8;
-      if (!onGround && headingDifference!==null && headingDifference>105 && Math.min(distanceToOrigin,distanceToDestination)>6) continue;
-      // Reject stale positions even if the transponder is still being heard.
-      if (seenPos>30) continue;
-      // Once the scheduled arrival has passed, do not keep presenting an airborne aircraft
-      // far from destination as that flight. This prevents an opposite-direction leg winning.
-      const minutesAfterArrival=(now-flight.arrival.getTime())/60000;
-      if (!onGround && minutesAfterArrival>12 && distanceToDestination>22) continue;
-      if (!onGround && minutesAfterArrival>30) continue;
-      if (onGround) {
-        const minutesFromDeparture=(now-flight.departure.getTime())/60000;
-        // Before departure, a Ryanair 737 may be waiting at the origin. This is only a candidate,
-        // never a confirmed assignment; no future arrival-airport observation is requested.
-        const nearOriginInTime=distanceToOrigin<=18 && minutesFromDeparture>=-180 && minutesFromDeparture<=45;
-        const nearDestinationInTime=distanceToDestination<=18 && minutesAfterArrival>=-30 && minutesAfterArrival<=30;
-        if (!nearOriginInTime && !nearDestinationInTime) continue;
+      const distanceToOrigin=hav(origin,pos),distanceToDestination=hav(destination,pos);
+      const onGround=ac.alt_baro==="ground";
+      const seenPos=positionAge(ac),track=numeric(ac.track);
+      if(seenPos>30) continue;
+      const nearOrigin=distanceToOrigin<=35;
+      const nearDestination=distanceToDestination<=25;
+      const minutesFromDeparture=(now-dep)/60000;
+      const minutesAfterArrival=(now-arr)/60000;
+      let progressDifference=0,headingDifference=null;
+      if(onGround) {
+        const validGround=nearOrigin&&minutesFromDeparture>=-180&&minutesFromDeparture<=75;
+        const atDestination=nearDestination&&minutesAfterArrival>=-30&&minutesAfterArrival<=30;
+        if(!validGround&&!atDestination) continue;
+      } else {
+        if(geo.alongTrack < -25 || geo.alongTrack > geo.distance+30 || geo.crossTrack>85) continue;
+        if(minutesAfterArrival>12&&distanceToDestination>22) continue;
+        if(minutesAfterArrival>30) continue;
+        const fraction=Math.max(0,Math.min(1,geo.alongTrack/Math.max(1,geo.distance)));
+        progressDifference=Math.abs(fraction-expectedFraction);
+        headingDifference=track===null?null:angleDiff(track,routeBearing);
+        const nearEndpoint=Math.min(distanceToOrigin,distanceToDestination)<=12;
+        if(!nearEndpoint&&progressDifference>0.38) continue;
+        if(!nearEndpoint&&headingDifference!==null&&headingDifference>125) continue;
       }
-      // Require tighter route geometry and progress. A compatible aircraft type/operator
-      // is not proof that this aircraft is operating this commercial flight.
-      if (!onGround && (geo.crossTrack>38 || progressDifference>0.24) && !nearEndpoint) continue;
-      const headingScore=headingDifference===null?0:headingDifference<35?18:headingDifference<65?10:headingDifference<90?2:-12;
-      const operatorScore=compatibility.operatorMatch?45:0;
-      const typeScore=compatibility.typeMatch?18:0;
-      const routeScore=Math.max(0,22-geo.crossTrack/3);
-      const progressScore=Math.max(0,18-progressDifference*30);
-      const freshnessScore=Math.max(0,14-seenPos/4);
-      const groundPenalty=onGround && fraction>0.12 && fraction<0.88 ? 20:0;
-      const score=operatorScore+typeScore+routeScore+progressScore+headingScore+freshnessScore-groundPenalty;
-      if (score < 35) continue;
-      candidates.push({...ac,score,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,routeBearing,headingDifference,altitude,onGround,seenPos,typeMatch:compatibility.typeMatch,operatorMatch:compatibility.operatorMatch,expectedFraction,matchStatus:"POSSIBLE ONLY"});
+      const routePenalty=Math.min(40,geo.crossTrack/2);
+      const progressPenalty=progressDifference*45;
+      const freshness=Math.max(0,18-seenPos/3);
+      const groundBonus=onGround&&nearOrigin?18:0;
+      const headingBonus=headingDifference===null?0:Math.max(-8,12-headingDifference/8);
+      const score=55+freshness+groundBonus+headingBonus-routePenalty-progressPenalty;
+      candidates.push({...ac,score,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,expectedFraction,onGround,seenPos,operatorMatch:false,matchStatus:"IDENTITY CHECK PENDING"});
     }
-    return candidates.sort((a,b)=>b.score-a.score).slice(0,3);
+    candidates.sort((a,b)=>b.score-a.score);
+    // ADS-B itself has no airline field. Enrich only the strongest type/route candidates
+    // from an aircraft registry, then keep only confirmed Ryanair Group ownership/operator flags.
+    const checked=await Promise.all(candidates.slice(0,10).map(async ac=>{
+      try {
+        const identity=await aircraftIdentity(ac.hex);
+        const match=ryanairGroupIdentity(identity);
+        return {...ac,operatorMatch:match.ok,operatorName:match.owner||match.flag||"Unknown",identitySource:identity.source||"Aircraft registry",
+          r:ac.r||identity.registration||null,t:ac.t||identity.aircraftType||null};
+      } catch(error) {
+        return {...ac,operatorMatch:false,operatorName:"Unverified",identityError:error.message};
+      }
+    }));
+    return checked.filter(ac=>ac.operatorMatch).slice(0,3);
   }
 
   function saveSelected(flight,aircraft) {
@@ -502,7 +516,7 @@
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
-      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · ADS-B operator label matches Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}`;
+      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · aircraft registry identifies Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}`;
       const action=historical?"":`<button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button>`;
       return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} · NOT VERIFIED</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${evidence}${historical?" · NOT AIRLINE-CONFIRMED":""}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small>${action}</div>`;
     }).join("");
@@ -577,7 +591,7 @@
       }
       const final=[...unique.values()].sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,6);
       state.candidates=final;
-      renderCandidates(final,final.length?"Live ADS-B candidates only. Filtered to B738/B38M with a recognized Ryanair Group operator label. Position and route fit are not airline confirmation.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft passed both the Ryanair Group operator and B738/B38M filters.");
+      renderCandidates(final,final.length?"Live ADS-B candidates only. Filtered to B738/B38M and checked against aircraft registry ownership. Position and route fit are not airline confirmation.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft passed both the Ryanair Group operator and B738/B38M filters.");
       try { await refreshSelected(); } catch(e) { console.warn("Could not refresh saved aircraft",e.message); }
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
