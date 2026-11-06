@@ -79,7 +79,7 @@ export default {
     let source="Ryanair timetable";
     try {
      schedule=await enrichRyanairSchedule(schedule,o,d,y,m);
-     source="Ryanair timetable + Flight.info fallback";
+     source="Ryanair timetable + Flight.info best-effort";
     } catch (fallbackError) {
      // The optional secondary source must never take down the primary timetable.
      source="Ryanair timetable (fallback unavailable)";
