@@ -1,50 +1,28 @@
-# Setup V2 — iPhone + GitHub Pages + Cloudflare Worker
+# Setup — iPhone + GitHub Pages + Cloudflare Worker
 
-## Part A — create the free API bridge
-1. Open https://dash.cloudflare.com/ and create/sign into a free account.
-2. Open **Workers & Pages** → **Create** → **Create Worker**.
-3. Give it a name such as `wtbd-flight-proxy`.
-4. Deploy the starter Worker.
-5. Open **Edit code** (or Quick Edit), replace all starter code with the full contents of `worker.js` from this folder, then **Deploy**.
-6. Copy the Worker URL. It looks like `https://wtbd-flight-proxy.YOUR-SUBDOMAIN.workers.dev`.
+## Part A — Cloudflare Worker
 
-## Part B — connect the app to the Worker
-1. Open `config.js` in this folder.
-2. Replace `https://YOUR-WORKER-NAME.YOUR-SUBDOMAIN.workers.dev` with your real Worker URL. Keep the quotation marks.
-3. Save `config.js`.
+1. Open https://dash.cloudflare.com/ and sign in.
+2. Open **Workers & Pages** and select the existing `wtbd-flight-proxy` Worker.
+3. Replace its code with the complete contents of `worker.js` in this repository, if it is not already deployed by GitHub Actions.
+4. Deploy.
 
-## Part C — update GitHub repository
-Upload and replace these files in the ROOT of your existing repository:
-- `index.html`
-- `app.js`
-- `config.js` (new)
-- `manifest.webmanifest`
-- `sw.js`
-- `README.md`
-- `worker.js` is only for Cloudflare; it may also remain in GitHub but is not used by Pages.
-Keep your existing `icon-192.png` and `icon-512.png`, or use the included versions.
+The GitHub Actions workflow can deploy automatically when `worker.js` changes, provided the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are configured.
 
-## Part D — refresh iPhone
-1. Wait until GitHub Pages finishes deploying.
-2. In Safari open the published site and reload.
-3. If the installed home-screen app still shows the old version, fully close it and reopen. If needed, remove the old home-screen shortcut and add it again from Safari.
+## Part B — GitHub Pages
 
-## Test
-- First test `https://YOUR-WORKER-URL.workers.dev/` — it should return `Unknown endpoint` as JSON. This confirms the Worker is online.
-- Then test `https://YOUR-WORKER-URL.workers.dev/api/aircraft?lat=49.4987&lon=11.078&dist=25` in Safari. It should return JSON with an `ac` array (possibly empty depending on coverage).
-- Finally test the app.
+The app is published from this repository. Check that `config.js` contains the existing Cloudflare Worker URL. Do not change the URL unless the Worker itself has been renamed.
 
-## Important
-This version is a beta. Ryanair's timetable endpoint is unofficial and can change. ADS-B coverage is incomplete. Route matching is probabilistic and therefore asks for manual confirmation. Do not treat it as an operational source or as proof of exact takeoff/landing or delay.
+## Part C — iPhone refresh
 
+1. Open the published site in Safari and reload it.
+2. Close and reopen the Home Screen app.
+3. If an old cached version remains, remove the Home Screen shortcut and add it again from Safari.
 
-## Part E — optional worldwide airport-board fallback
+## Schedule source logic
 
-The app already uses Aena's public board for supported Spanish airports without a key. For airports outside that coverage (for example PMO, BUD and STN), you can enable the optional SkyLink airport-board source:
+For every route touching NUE, the Worker queries the official Nuremberg Airport departures or arrivals board. If no matching flight is returned, it tries a Google Search fallback. Google is not a guaranteed timetable API; the fallback may return no result or incomplete information. The app must not invent a flight number or treat a Google snippet as an official confirmation.
 
-1. Apply for the **FREE Trial** at https://skylinkapi.com/pricing/. The published allowance is 1,000 requests/month for personal, non-commercial projects; applications are reviewed and access is not automatic.
-2. After approval, open Cloudflare Dashboard → **Workers & Pages** → **wtbd-flight-proxy** → **Settings** → **Variables and Secrets**.
-3. Add a **Secret** named `SKYLINK_API_KEY` and paste the key as its value.
-4. Save and deploy the Worker.
+## ADS-B
 
-The key stays in Cloudflare and is never placed in the iPhone app or GitHub source. Without this secret, unsupported airports continue to use the public Ryanair timetable and may have gaps.
+The app uses ADS-B.lol for live aircraft observations after a scheduled flight has been identified. Aircraft candidates are probabilistic and require manual confirmation. Do not treat the app as an operational aviation source or proof of exact takeoff, landing or delay.
