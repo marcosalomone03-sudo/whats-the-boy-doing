@@ -25,7 +25,7 @@ function flightInfoRows(html,flightNumber,origin,destination,year,month){
 }
 async function enrichRyanairSchedule(data,origin,destination,year,month){
  if(!data||!Array.isArray(data.days))return data;
- const numbers=[...new Set(data.days.flatMap(day=>(day.flights||[]).map(f=>{const raw=String(f.flightNumber||f.number||"").toUpperCase().replace(/\s+/g,"");return /^[A-Z]{2,3}\d/.test(raw)?raw:(f.carrierCode||"FR")+raw;}).filter(n=>/^FR\d+$/i.test(n))))].slice(0,12);
+ const numbers=[...new Set(data.days.flatMap(day=>(day.flights||[]).map(f=>{const raw=String(f.flightNumber||f.number||"").toUpperCase().replace(/\s+/g,"");return /^[A-Z]{2,3}\d/.test(raw)?raw:(f.carrierCode||"FR")+raw;}).filter(n=>/^FR\d+$/i.test(n))))].slice(0,4);
  if(!numbers.length)return data;
  const results=await Promise.allSettled(numbers.map(async number=>{const response=await fetch("https://www.flight.info/"+encodeURIComponent(number),{headers:{"Accept":"text/html","User-Agent":"Mozilla/5.0 (compatible; WTBD/1.0)"}});if(!response.ok)return [];return flightInfoRows(await response.text(),number,origin,destination,year,month);}));
  const byDay=new Map(data.days.map(day=>[Number(day.day),day]));
