@@ -476,13 +476,16 @@
   function renderAircraft(flight,ac) {
     const onGround=ac.alt_baro==="ground";
     const altitude=numeric(ac.alt_baro), speed=numeric(ac.gs), lat=numeric(ac.lat), lon=numeric(ac.lon);
-    // ADS-B marks both parked and taxiing aircraft as "ground"; use groundspeed to distinguish movement.
-    const taxiing=onGround && speed!==null && speed>=5;
-    const status=onGround?(taxiing?"TAXIING":"ON GROUND"):altitude!==null?"AIRBORNE":"UNKNOWN";
-    const statusClass=onGround?"ground":status==="AIRBORNE"?"air":"none";
+    const destination=airport(flight.destination);
+    const distanceToDestination=destination&&lat!==null&&lon!==null?hav(destination,{lat,lon}):Infinity;
+    const nearDestination=distanceToDestination<=3;
+    const lowNearDestination=nearDestination&&altitude!==null&&altitude<=1800;
+    const taxiing=onGround&&speed!==null&&speed>=5;
+    const status=onGround?(taxiing?"TAXIING":"ON GROUND"):lowNearDestination?"NEAR DESTINATION · STATUS UNCONFIRMED":altitude!==null?"AIRBORNE":"UNKNOWN";
+    const statusClass=onGround||lowNearDestination?"ground":status==="AIRBORNE"?"air":"none";
     return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><span class="status ${statusClass}">${status}</span></div><div class="notice">MANUALLY SELECTED ADS-B CANDIDATE — free data sources do not confirm that this aircraft is assigned to ${esc(flight.flightNumber)}. Registration and HEX below are read directly from its transponder feed.</div>
       <div class="stats">
-        <div class="stat"><small>Actual callsign</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
+        <div class="stat"><small>ADS-B callsign · unverified</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
         <div class="stat"><small>ICAO HEX</small><strong>${esc(ac.hex)}</strong></div>
         <div class="stat"><small>Registration</small><strong>${esc(ac.r)}</strong></div>
         <div class="stat"><small>Aircraft type</small><strong>${esc(ac.t)}</strong></div>
@@ -592,7 +595,7 @@
       const final=[...unique.values()].sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,6);
       state.candidates=final;
       renderCandidates(final,final.length?"Live ADS-B candidates only. Filtered to B738/B38M and checked against aircraft registry ownership. Position and route fit are not airline confirmation.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft passed both the Ryanair Group operator and B738/B38M filters.");
-      try { await refreshSelected(); } catch(e) { console.warn("Could not refresh saved aircraft",e.message); }
+      // Never silently restore a previously selected aircraft after a fresh search.
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
       $("connection").textContent=final.length?`${final.length} filtered live aircraft · not airline-confirmed`:"No aircraft passed the strict Ryanair 737 filter";
