@@ -95,6 +95,22 @@ export default {
     const googleSearchUrl="https://www.google.com/search?q="+encodeURIComponent("Ryanair flight "+origin+" "+destination+" "+date+" flight number schedule");
     return cors(JSON.stringify(daySchedule(date,flights,source,googleSearchUrl)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
    }
+   if(u.pathname==="/api/observed" || u.pathname==="/api/overflights"){
+    if(!env.FLYITALYADSB_API_KEY)return cors(JSON.stringify({error:"FLYITALYADSB_API_KEY secret is not configured on this Worker."}),503,{"Content-Type":"application/json"});
+    let targetUrl="";
+    if(u.pathname==="/api/observed"){
+     const airport=(u.searchParams.get("airport")||"").toUpperCase(),type=(u.searchParams.get("type")||"arrivals").toLowerCase(),date=u.searchParams.get("date")||"";
+     if(!/^[A-Z]{3,4}$/.test(airport)||!["arrivals","departures"].includes(type)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date))return cors(JSON.stringify({error:"Invalid observed-flight parameters"}),400,{"Content-Type":"application/json"});
+     targetUrl="https://api.flyitalyadsb.com/v2/flights/airport/"+encodeURIComponent(airport)+"?type="+type+"&date="+date;
+    }else{
+     const lat=Number(u.searchParams.get("lat")),lon=Number(u.searchParams.get("lon")),from=u.searchParams.get("from")||"",to=u.searchParams.get("to")||"",dist=Number(u.searchParams.get("dist")||10),fm=Date.parse(from),tm=Date.parse(to);
+     if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||dist<1||dist>10||!Number.isFinite(fm)||!Number.isFinite(tm)||tm<=fm||tm-fm>21600000)return cors(JSON.stringify({error:"Invalid overflight parameters; Free tier allows up to 10 km and 6 hours."}),400,{"Content-Type":"application/json"});
+     targetUrl="https://api.flyitalyadsb.com/v2/overflights?lat="+lat+"&lon="+lon+"&dist="+dist+"&from="+encodeURIComponent(from)+"&to="+encodeURIComponent(to);
+    }
+    const upstream=await fetch(targetUrl,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/11.0"}});
+    const body=await upstream.text();
+    return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"public, max-age=60","X-WTBD-Observed-Source":"FlyItalyADSB"});
+   }
    let target;
    if(u.pathname==="/api/aircraft"){
     const lat=Number(u.searchParams.get("lat")),lon=Number(u.searchParams.get("lon")),dist=Number(u.searchParams.get("dist")||35);
