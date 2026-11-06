@@ -133,15 +133,18 @@ function poolType(r){return String(r?.t||r?.type||r?.aircraft_type||r?.icao_type
 function poolTime(r){const v=r?.closest_time??r?.timestamp??r?.time??r?.seen;if(typeof v==="number")return new Date(v<1e12?v*1000:v).toISOString();const d=new Date(v);return Number.isFinite(d.getTime())?d.toISOString():null;}
 async function poolFetch(env,from,to){
  const url="https://api.flyitalyadsb.com/v2/overflights?lat=49.4987&lon=11.0780&dist=10&from="+encodeURIComponent(from.toISOString())+"&to="+encodeURIComponent(to.toISOString());
- const r=await fetch(url,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/14.0"}});
- const body=await r.text();if(!r.ok)throw new Error("FlyItalyADSB HTTP "+r.status+" "+body.slice(0,120));
- return poolRows(JSON.parse(body));
+ const r=await fetch(url,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/15.0"}});
+ const body=await r.text();let payload;
+ try{payload=JSON.parse(body);}catch{throw new Error("FlyItalyADSB returned non-JSON HTTP "+r.status+": "+body.slice(0,180));}
+ if(!r.ok)throw new Error("FlyItalyADSB HTTP "+r.status+" "+body.slice(0,180));
+ const rows=poolRows(payload);
+ return {rows,meta:{httpStatus:r.status,contentType:r.headers.get("Content-Type")||"",plan:r.headers.get("X-FIA-Plan")||null,usedMonth:r.headers.get("X-FIA-Used-Month")||null,topLevelKeys:payload&&typeof payload==="object"?Object.keys(payload).slice(0,30):[],upstreamCount:payload?.count??null,candidates:payload?.candidates??null,coverage:payload?.coverage??null,completeUntil:payload?.complete_until??null,truncated:payload?.truncated??null,returnedArrayKey:Array.isArray(payload?.overflights)?"overflights":Array.isArray(payload?.aircraft)?"aircraft":Array.isArray(payload?.results)?"results":Array.isArray(payload?.items)?"items":Array.isArray(payload?.ac)?"ac":Array.isArray(payload)?"root-array":"none",requestedFrom:from.toISOString(),requestedTo:to.toISOString()}};
 }
 async function updatePool(env,day,from,to,mode){
  if(!env.AIRCRAFT_POOL||!env.FLYITALYADSB_API_KEY)throw new Error("AIRCRAFT_POOL KV or FlyItalyADSB key missing");
  const key=poolKey(day),old=await env.AIRCRAFT_POOL.get(key,"json")||{airport:"NUE",date:day,aircraft:{},observations:[]};
  const aircraft=old.aircraft||{},obs=old.observations||[];let accepted=0;
- const rows=await poolFetch(env,from,to),diagnostics={fetchedRows:rows.length,missingHex:0,unsupportedType:0,missingTime:0,accepted:0,firstRowKeys:rows[0]?Object.keys(rows[0]).slice(0,30):[],sampleTypes:[...new Set(rows.slice(0,100).map(r=>poolType(r)||"(empty)"))].slice(0,20)};
+ const fetched=await poolFetch(env,from,to),rows=fetched.rows,diagnostics={...fetched.meta,fetchedRows:rows.length,missingHex:0,unsupportedType:0,missingTime:0,accepted:0,firstRowKeys:rows[0]?Object.keys(rows[0]).slice(0,30):[],sampleTypes:[...new Set(rows.slice(0,100).map(r=>poolType(r)||"(empty)"))].slice(0,20)};
  for(const r of rows){
   const hex=poolHex(r),type=poolType(r),time=poolTime(r);
   if(!/^[0-9a-f]{6}$/.test(hex)){diagnostics.missingHex++;continue;}
