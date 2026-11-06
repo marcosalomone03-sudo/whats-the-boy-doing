@@ -74,9 +74,11 @@
 
   function routesFor(value) {
     const parts = value.split("-");
-    return parts.length === 1
-      ? [["NUE",parts[0]],[parts[0],"NUE"]]
-      : [["NUE",parts[0]],[parts[0],"NUE"],["NUE",parts[1]],[parts[1],"NUE"]];
+    if (parts.length === 1) return [["NUE",parts[0]],[parts[0],"NUE"]];
+    // If NUE is explicitly entered, treat the input as one exact route.
+    // Two non-NUE codes are destination shortcuts and expand in both directions.
+    if (parts.includes("NUE")) return [[parts[0],parts[1]]];
+    return [["NUE",parts[0]],[parts[0],"NUE"],["NUE",parts[1]],[parts[1],"NUE"]];
   }
   function numeric(value) {
     if (value === null || value === undefined || value === "") return null;
