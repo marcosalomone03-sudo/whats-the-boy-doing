@@ -338,8 +338,8 @@
       const distanceToDestination=hav(destination,pos);
       // A callsign match is not enough: aircraft direction must agree with the scheduled leg.
       // Near either airport, turns and runway alignment make heading less decisive.
-      const nearEndpoint=Math.min(distanceToOrigin,distanceToDestination)<=18;
-      if (!onGround && headingDifference!==null && headingDifference>105 && !nearEndpoint) continue;
+      const nearEndpoint=Math.min(distanceToOrigin,distanceToDestination)<=8;
+      if (!onGround && headingDifference!==null && headingDifference>105 && Math.min(distanceToOrigin,distanceToDestination)>6) continue;
       // Reject stale positions even if the transponder is still being heard.
       if (seenPos>30) continue;
       // Once the scheduled arrival has passed, do not keep presenting an airborne aircraft
