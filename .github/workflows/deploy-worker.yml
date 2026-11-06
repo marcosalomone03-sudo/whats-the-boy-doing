@@ -73,4 +73,10 @@ jobs:
           if(feedSource!=="FlyItalyADSB")throw new Error("FlyItalyADSB primary feed not active; got "+(feedSource||"no source header"));
           const hex=aircraft.data.ac.find(a=>/^[0-9a-f]{6}$/i.test(String(a.hex||"")))?.hex;
           if(hex)await request("/api/hex?icao="+encodeURIComponent(hex));
+          const identity=await request("/api/identity?icao=4cae61");
+          const owner=String(identity.data.registeredOwner||"").toLowerCase();
+          const flag=String(identity.data.operatorFlagCode||"").toUpperCase();
+          if(identity.data.registration!=="EI-IJL"||identity.data.aircraftType!=="B38M"||(!owner.includes("ryanair")&&flag!=="RYR"))
+            throw new Error("Aircraft registry identity check failed for known Ryanair aircraft 4CAE61: "+JSON.stringify(identity.data));
+          console.log("PASS aircraft registry:",identity.data.registration,identity.data.aircraftType,identity.data.registeredOwner||flag,identity.data.source);
           NODE
