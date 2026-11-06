@@ -58,8 +58,15 @@ export default {
    if(u.pathname==="/api/schedule"){
     if(!upstream.ok)return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json"});
     let schedule;try{schedule=JSON.parse(body);}catch{return cors(JSON.stringify({error:"Invalid timetable response"}),502,{"Content-Type":"application/json"});}
-    schedule=await enrichRyanairSchedule(schedule,o,d,y,m);
-    return cors(JSON.stringify(schedule),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":"Ryanair timetable + Flight.info fallback"});
+    let source="Ryanair timetable";
+    try {
+     schedule=await enrichRyanairSchedule(schedule,o,d,y,m);
+     source="Ryanair timetable + Flight.info fallback";
+    } catch (fallbackError) {
+     // The optional secondary source must never take down the primary timetable.
+     source="Ryanair timetable (fallback unavailable)";
+    }
+    return cors(JSON.stringify(schedule),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source});
    }
    return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json"});
   } catch(e) {
