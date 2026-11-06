@@ -264,7 +264,12 @@
     const lines=[...groups.values()].map(g=>{
       const times=g.records.map(r=>r.closest_time?new Date(typeof r.closest_time==="number"?r.closest_time*1000:Date.parse(r.closest_time)).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable").join(", ");
       const checkpoints=[g.departure?"near departure airport":"",g.arrival?"near arrival airport":""].filter(Boolean).join(" + ");
-      const track=g.records.find(r=>r.dailyTrace)?.dailyTrace;\n      const trackPoints=track?.trace||[];\n      const first=trackPoints.length?new Date((Number(track.timestamp)+Number(trackPoints[0][0]))*1000).toISOString().slice(11,16)+" UTC":"";\n      const last=trackPoints.length?new Date((Number(track.timestamp)+Number(trackPoints[trackPoints.length-1][0]))*1000).toISOString().slice(11,16)+" UTC":"";\n      const trackLine=trackPoints.length?"\\nDaily track: "+trackPoints.length+" positions · "+first+"–"+last:"\\nDaily track not available";\n      return g.flight.flightNumber+" · "+g.flight.origin+" → "+g.flight.destination+"\\n"+g.registration+" · "+g.type+" · HEX "+g.hex+"\\nObserved "+checkpoints+" · "+times+trackLine;
+      const track=g.records.find(r=>r.dailyTrace)?.dailyTrace;
+      const trackPoints=track?.trace||[];
+      const first=trackPoints.length?new Date((Number(track.timestamp)+Number(trackPoints[0][0]))*1000).toISOString().slice(11,16)+" UTC":"";
+      const last=trackPoints.length?new Date((Number(track.timestamp)+Number(trackPoints[trackPoints.length-1][0]))*1000).toISOString().slice(11,16)+" UTC":"";
+      const trackLine=trackPoints.length?"\nDaily track: "+trackPoints.length+" positions · "+first+"–"+last:"\nDaily track not available";
+      return g.flight.flightNumber+" · "+g.flight.origin+" → "+g.flight.destination+"\n"+g.registration+" · "+g.type+" · HEX "+g.hex+"\nObserved "+checkpoints+" · "+times+trackLine;
     });
     el.textContent=lines.join("\n\n")+"\n\nSource: FlyItalyADSB overflights (ADS-B/MLAT). Same ICAO observed near both airports is stronger evidence; one airport alone is not flight confirmation. Callsigns are not used to match flights."+(message?"\n\n"+message:"");
   }
