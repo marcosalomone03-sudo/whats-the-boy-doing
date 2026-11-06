@@ -55,6 +55,11 @@ jobs:
             "sources:", schedule.response.headers.get("X-WTBD-Schedule-Sources") || "header missing",
             "fallback diagnostic:", schedule.response.headers.get("X-WTBD-Schedule-Fallback-Error") || schedule.data._wtbdFallbackError || "none");
 
+          const fi = await fetch("https://www.flight.info/FR904", { headers: { Accept: "text/html", "User-Agent": "Mozilla/5.0 (compatible; WTBD/1.0)" } });
+          const fiHtml = await fi.text();
+          console.log("INFO Flight.info direct:", fi.status, "bytes:", fiHtml.length,
+            "upcoming marker:", fiHtml.toLowerCase().includes("upcoming scheduled flights in the coming 30 days"),
+            "Nov 6 marker:", /6\\s+Nov\\s+2026/i.test(fiHtml));
           const pmo = await request("/api/schedule?origin=PMO&destination=NUE&year=2026&month=11");
           if (!pmo.data || !Array.isArray(pmo.data.days)) throw new Error("PMO-NUE schedule did not return days[]");
           const nov6 = pmo.data.days.find(day => Number(day.day) === 6);
