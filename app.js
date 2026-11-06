@@ -255,7 +255,7 @@
       const group=groups.get(key); group[item.checkpoint]=true; group.records.push(item);
     }
     const lines=[...groups.values()].map(g=>{
-      const times=g.records.map(r=>r.closest_time?new Date(Number(r.closest_time)*1000).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable").join(", ");
+      const times=g.records.map(r=>r.closest_time?new Date(typeof r.closest_time==="number"?r.closest_time*1000:Date.parse(r.closest_time)).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable").join(", ");
       const checkpoints=[g.departure?"near departure airport":"",g.arrival?"near arrival airport":""].filter(Boolean).join(" + ");
       return g.flight.flightNumber+" · "+g.flight.origin+" → "+g.flight.destination+"\n"+g.registration+" · "+g.type+" · HEX "+g.hex+"\nObserved "+checkpoints+" · "+times;
     });
