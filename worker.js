@@ -20,24 +20,64 @@ function localNueTime(value){
  if(!Number.isFinite(date.getTime()))return "";
  return new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Berlin",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(date);
 }
+function boardRows(payload){
+ if(Array.isArray(payload))return payload;
+ for(const key of ["data","flights","items","results","arrivals","departures","flightStatus","flightStatuses","rows","content"]){
+  const value=payload?.[key];
+  if(Array.isArray(value))return value;
+  if(value&&typeof value==="object"){
+   const nested=boardRows(value);
+   if(nested.length)return nested;
+  }
+ }
+ return [];
+}
+function boardAirport(row,side){
+ const paths=side==="from"
+  ?[row?.fromAirport?.iata,row?.departureAirport?.iata,row?.origin?.iata,row?.departure?.airport?.iata,row?.departure?.airportIata,row?.departureAirportIata,row?.originIata,row?.fromIata,row?.from]
+  :[row?.toAirport?.iata,row?.arrivalAirport?.iata,row?.destination?.iata,row?.arrival?.airport?.iata,row?.arrival?.airportIata,row?.arrivalAirportIata,row?.destinationIata,row?.toIata,row?.to];
+ for(const value of paths){const code=String(value?.iata||value||"").trim().toUpperCase();if(/^[A-Z]{3}$/.test(code))return code;}
+ return "";
+}
+function boardDate(row){
+ const value=pick(row,["scheduledLocalDate","scheduledDate","localDate","date","operationDate","departureDate","arrivalDate"]);
+ if(value==="")return "";
+ const raw=String(value);
+ const digits=raw.replace(/\\D/g,"");
+ return digits.length>=8?digits.slice(0,8):"";
+}
+function boardClock(row){
+ const value=pick(row,["scheduledTime","scheduledDateTime","scheduledLocalTime","scheduledArrivalTime","scheduledDepartureTime","arrivalTime","departureTime","scheduleTime","time"]);
+ if(value==="")return "";
+ if(typeof value==="object")return time24(pick(value,["dateTime","time","local","value"]));
+ const raw=String(value).trim();
+ if(/^\\d{1,2}:\\d{2}/.test(raw))return time24(raw);
+ const parsed=new Date(raw);
+ if(Number.isFinite(parsed.getTime()))return localNueTime(parsed.toISOString());
+ return time24(raw);
+}
 function normalizeBoardRows(payload,origin,destination,date,direction){
- const rows=Array.isArray(payload)?payload:[];
+ const rows=boardRows(payload);
  const expectedFrom=origin==="NUE"?"NUE":origin;
  const expectedTo=destination==="NUE"?"NUE":destination;
  const wantedDate=Number(dateCompact(date));
  return rows.map(row=>{
-  const airline=String(row?.flight?.airline?.iata||"").toUpperCase();
-  const numberPart=String(row?.flight?.number||"").replace(/\s/g,"");
-  const number=airline+numberPart;
-  const from=String(row?.fromAirport?.iata||"").toUpperCase();
-  const to=String(row?.toAirport?.iata||"").toUpperCase();
-  const localDate=Number(row?.scheduledLocalDate||0);
-  if(!/^((FR|RK|RR|OE)\d{1,5})$/.test(number))return null;
-  // Validate both endpoints to prevent opposite-direction flights entering this route.
-  if(from!==expectedFrom||to!==expectedTo||localDate!==wantedDate)return null;
-  const boardTime=localNueTime(row?.scheduledTime);
+  const flight=row?.flight&&typeof row.flight==="object"?row.flight:row;
+  const airline=String(flight?.airline?.iata||row?.airline?.iata||row?.carrier?.iata||row?.carrierCode||row?.airlineCode||"").toUpperCase();
+  const rawNumber=String(flight?.number||row?.flightNumber||row?.number||row?.flightNo||row?.ident||"").replace(/\\s/g,"").toUpperCase();
+  const number=/^(FR|RK|RR|OE)\\d{1,5}$/.test(rawNumber)?rawNumber:airline+rawNumber;
+  const from=boardAirport(row,"from"),to=boardAirport(row,"to");
+  const localDate=boardDate(row);
+  // The airport board query itself is route-filtered. Validate every endpoint/date
+  // the API supplies, but tolerate omitted fields when the endpoint has already filtered them.
+  if(!/^((FR|RK|RR|OE)\\d{1,5})$/.test(number))return null;
+  if((from&&from!==expectedFrom)||(to&&to!==expectedTo))return null;
+  if(from&&to&&(from!==expectedFrom||to!==expectedTo))return null;
+  if(localDate&&Number(localDate)!==wantedDate)return null;
+  if(!from&&!to)return null;
+  const boardTime=boardClock(row);
   if(!boardTime)return null;
-  return {flightNumber:number,carrierCode:airline,boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,source:"Nuremberg Airport"};
+  return {flightNumber:number,carrierCode:number.match(/^(FR|RK|RR|OE)/)[1],boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,source:"Nuremberg Airport"};
  }).filter(Boolean);
 }
 async function nurembergFlights(origin,destination,date){
@@ -50,7 +90,9 @@ async function nurembergFlights(origin,destination,date){
  const response=await fetch(url,{headers,cf:{cacheTtl:60,cacheEverything:true}});
  if(!response.ok)throw new Error("Nuremberg board HTTP "+response.status);
  const payload=await response.json();
- return normalizeBoardRows(payload,origin,destination,date,direction);
+ const rows=boardRows(payload);
+ const flights=normalizeBoardRows(payload,origin,destination,date,direction);
+ return flights;
 }
 async function googleFlights(origin,destination,date){
  if(origin!=="NUE"&&destination!=="NUE")return [];
