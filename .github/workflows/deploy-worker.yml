@@ -53,7 +53,7 @@ jobs:
           console.log("INFO schedule days:", schedule.data.days.length,
             "flights:", schedule.data.days.reduce((n, day) => n + (day.flights || []).length, 0),
             "sources:", schedule.response.headers.get("X-WTBD-Schedule-Sources") || "header missing",
-            "fallback diagnostic:", schedule.response.headers.get("X-WTBD-Schedule-Fallback-Error") || "none");
+            "fallback diagnostic:", schedule.response.headers.get("X-WTBD-Schedule-Fallback-Error") || schedule.data._wtbdFallbackError || "none");
 
           const aircraft = await request("/api/aircraft?lat=51.4700&lon=-0.4543&dist=35");
           if (!aircraft.data || !Array.isArray(aircraft.data.ac)) {
