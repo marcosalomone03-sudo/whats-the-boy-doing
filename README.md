@@ -1,29 +1,48 @@
-# What's the boy doing? — V7
+# What's the boy doing? — flight tracker
 
-A personal flight-day tracker for Ryanair-group flights from NUE. It identifies scheduled sectors, then uses ADS-B.lol to find and manually confirm a plausible aircraft.
+A personal flight-day tracker for Ryanair-group flights operating to or from Nuremberg (NUE).
 
-## Schedule discovery
+## Flight discovery
 
-The app combines sources instead of trusting one incomplete timetable:
+When the user enters an airport code such as `ALC`, the app expands it into two routes:
 
-1. **Ryanair public timetable** — baseline schedule.
-2. **Aena official airport board** — no API key required; supplements missing Ryanair rows for supported Spanish airports (including ALC, AGP, PMI, BCN and MAD).
-3. **SkyLink airport-board API (optional)** — worldwide fallback for the NUE departures/arrivals board. The Worker can use it when the `SKYLINK_API_KEY` secret is configured.
+- NUE → ALC
+- ALC → NUE
 
-Aena publishes only the time at its own airport. When the opposite endpoint time is unavailable from the timetable, the app estimates block time from route distance and marks that time with `~`; it is not an airline-published arrival/departure time.
+For two airport codes such as `BUD-ALC`, it expands them into the four routes connecting each airport with NUE.
 
-Without a SkyLink key, airports not covered by Aena still depend on the Ryanair timetable. This is why a flight such as PMO–NUE FR904 can still be missing.
+For each route and selected date, the Cloudflare Worker:
+
+1. Queries the **official Nuremberg Airport departures board** for flights leaving NUE, or the **official arrivals board** for flights arriving at NUE.
+2. If the official board returns no matching flight, it attempts a **Google Search fallback** for the route, date, airline and flight number.
+3. Returns the flight number and the available board time to the app. If only one endpoint time is available, the app estimates the other time and marks it with `~`.
+
+Google Search is an opportunistic fallback, not an authoritative timetable API. Results are accepted only when a Ryanair-group flight number and a time can be extracted from the returned search text. Google may block automated requests or return incomplete/ambiguous snippets; in that case the app reports no result rather than inventing a flight.
+
+## Aircraft tracking
+
+After the schedule is identified, the app uses the public ADS-B.lol API to find plausible aircraft along the route. The user manually confirms a candidate. Callsigns are never inferred by adding a prefix to the commercial flight number.
+
+Displayed ADS-B information can include registration, aircraft type, callsign, ICAO hex, ground speed, altitude and position. ADS-B is observational data: it is not airline-confirmed flight status and coverage may be incomplete.
 
 ## Free services
 
-- Ryanair's public timetable endpoint (unofficial/undocumented and subject to change).
-- Aena's public airport-board endpoint for supported Spanish airports.
-- ADSB.lol public API for live aircraft observations.
-- Optional SkyLink API free trial: 1,000 requests/month for personal, non-commercial use; application and approval required. See [pricing](https://skylinkapi.com/pricing/) and [schedule docs](https://skylinkapi.com/docs/v3/schedules/).
-- Cloudflare Workers Free as the CORS bridge.
+- Nuremberg Airport public flight board.
+- Google Search HTML results as a best-effort fallback (not a guaranteed API).
+- ADS-B.lol public API.
+- Cloudflare Workers Free as the CORS/API bridge.
+- GitHub Pages for hosting.
 
-No AviationStack or FlightNerve integration is used. ADS-B matches remain probabilistic and require manual confirmation; they are not proof of airline-confirmed flight status.
+No AviationStack, FlightNerve, Aena or SkyLink integration is used by the current schedule pipeline.
 
-## Setup
+## Development
 
-Follow `SETUP.md`. The app requires the Cloudflare Worker URL in `config.js`. To enable worldwide airport-board fallback, add the optional `SKYLINK_API_KEY` Worker secret as described in `SETUP.md`.
+The Worker exposes:
+
+- `/api/schedule?origin=NUE&destination=ALC&date=2026-11-06`
+- `/api/aircraft?lat=49.4987&lon=11.078&dist=35`
+- `/api/hex?icao=4CA123`
+
+Every scheduled route must have NUE as origin or destination. The app's route expansion enforces this.
+
+The schedule response includes a `source` field so the UI can distinguish the official Nuremberg board from the Google fallback.
