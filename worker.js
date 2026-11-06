@@ -4,7 +4,7 @@
  * ADS-B.lol is used only after a scheduled flight has been identified.
  */
 function dateCompact(date){return date.replace(/-/g,"");}
-function daySchedule(date,flights,source,googleSearchUrl){return {source,googleSearchUrl,days:[{day:Number(date.slice(-2)),flights}]};}
+function daySchedule(date,flights,source,googleSearchUrl,diagnostics){return {source,googleSearchUrl,diagnostics,days:[{day:Number(date.slice(-2)),flights}]};}
 function pick(obj,keys){for(const k of keys){const v=obj?.[k];if(v!==undefined&&v!==null&&String(v).trim()!=="")return v;}return "";}
 function time24(value){
  const s=String(value||"").trim();
@@ -34,20 +34,20 @@ function boardRows(payload){
 }
 function boardAirport(row,side){
  const paths=side==="from"
-  ?[row?.fromAirport?.iata,row?.departureAirport?.iata,row?.origin?.iata,row?.departure?.airport?.iata,row?.departure?.airportIata,row?.departureAirportIata,row?.originIata,row?.fromIata,row?.from]
-  :[row?.toAirport?.iata,row?.arrivalAirport?.iata,row?.destination?.iata,row?.arrival?.airport?.iata,row?.arrival?.airportIata,row?.arrivalAirportIata,row?.destinationIata,row?.toIata,row?.to];
+  ?[row?.fromAirport?.iata,row?.departureAirport?.iata,row?.origin?.iata,row?.departure?.airport?.iata,row?.departure?.airportIata,row?.departureAirportIata,row?.departureAirportCode,row?.departureIata,row?.originIata,row?.originCode,row?.fromIata,row?.fromCode,row?.from]
+  :[row?.toAirport?.iata,row?.arrivalAirport?.iata,row?.destination?.iata,row?.arrival?.airport?.iata,row?.arrival?.airportIata,row?.arrivalAirportIata,row?.arrivalAirportCode,row?.arrivalIata,row?.destinationIata,row?.destinationCode,row?.toIata,row?.toCode,row?.to];
  for(const value of paths){const code=String(value?.iata||value||"").trim().toUpperCase();if(/^[A-Z]{3}$/.test(code))return code;}
  return "";
 }
 function boardDate(row){
- const value=pick(row,["scheduledLocalDate","scheduledDate","localDate","date","operationDate","departureDate","arrivalDate"]);
+ const value=pick(row,["scheduledLocalDate","scheduledDate","localDate","date","operationDate","departureDate","arrivalDate","scheduledArrivalDate","scheduledDepartureDate"]);
  if(value==="")return "";
  const raw=String(value);
  const digits=raw.replace(/\\D/g,"");
  return digits.length>=8?digits.slice(0,8):"";
 }
 function boardClock(row){
- const value=pick(row,["scheduledTime","scheduledDateTime","scheduledLocalTime","scheduledArrivalTime","scheduledDepartureTime","arrivalTime","departureTime","scheduleTime","time"]);
+ const value=pick(row,["scheduledTime","scheduledDateTime","scheduledLocalTime","scheduledArrivalTime","scheduledDepartureTime","arrivalTime","departureTime","scheduleTime","time","estimatedTime","actualTime"]);
  if(value==="")return "";
  if(typeof value==="object")return time24(pick(value,["dateTime","time","local","value"]));
  const raw=String(value).trim();
@@ -63,8 +63,8 @@ function normalizeBoardRows(payload,origin,destination,date,direction){
  const wantedDate=Number(dateCompact(date));
  return rows.map(row=>{
   const flight=row?.flight&&typeof row.flight==="object"?row.flight:row;
-  const airline=String(flight?.airline?.iata||row?.airline?.iata||row?.carrier?.iata||row?.carrierCode||row?.airlineCode||"").toUpperCase();
-  const rawNumber=String(flight?.number||row?.flightNumber||row?.number||row?.flightNo||row?.ident||"").replace(/\\s/g,"").toUpperCase();
+  const airline=String(flight?.airline?.iata||flight?.airline?.code||row?.airline?.iata||row?.airline?.code||row?.carrier?.iata||row?.carrierCode||row?.airlineCode||"").toUpperCase();
+  const rawNumber=String(flight?.number||flight?.flightNumber||row?.flightNumber||row?.number||row?.flightNo||row?.ident||row?.iataFlightNumber||"").replace(/\\s/g,"").toUpperCase();
   const number=/^(FR|RK|RR|OE)\\d{1,5}$/.test(rawNumber)?rawNumber:airline+rawNumber;
   const from=boardAirport(row,"from"),to=boardAirport(row,"to");
   const localDate=boardDate(row);
@@ -131,13 +131,23 @@ export default {
    if(u.pathname==="/api/schedule"){
     const origin=(u.searchParams.get("origin")||"").toUpperCase(),destination=(u.searchParams.get("destination")||"").toUpperCase(),date=u.searchParams.get("date")||"";
     if(!/^[A-Z]{3}$/.test(origin)||!/^[A-Z]{3}$/.test(destination)||!(origin==="NUE"||destination==="NUE")||!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid schedule parameters; every tracked route must touch NUE and include a date."}),400,{"Content-Type":"application/json"});
-    let flights=[],source="Nuremberg Airport";
-    try{flights=await nurembergFlights(origin,destination,date);}catch(error){source="Nuremberg Airport unavailable";}
+    let flights=[],source="Nuremberg Airport",diagnostics={};
+    try{
+     const direction=origin==="NUE"?"departures":"arrivals";
+     const other=origin==="NUE"?destination:origin;
+     const upstreamUrl="https://airportnue-service.justrelate.io/production/api/flight-status/"+direction+"?lang=en&airportIata="+encodeURIComponent(other)+"&flightNumber=&date="+dateCompact(date)+"&hourMin=&hourMax=";
+     const upstream=await fetch(upstreamUrl,{headers:{"Accept":"application/json, text/plain, */*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status","User-Agent":"Mozilla/5.0"},cf:{cacheTtl:60,cacheEverything:true}});
+     if(!upstream.ok)throw new Error("Nuremberg board HTTP "+upstream.status);
+     const payload=await upstream.json();
+     const rows=boardRows(payload);
+     flights=normalizeBoardRows(payload,origin,destination,date,direction);
+     diagnostics={payloadType:Array.isArray(payload)?"array":typeof payload,topLevelKeys:payload&&typeof payload==="object"&&!Array.isArray(payload)?Object.keys(payload).slice(0,20):[],rowCount:rows.length,firstRowKeys:rows[0]&&typeof rows[0]==="object"?Object.keys(rows[0]).slice(0,30):[],acceptedCount:flights.length};
+    }catch(error){source="Nuremberg Airport unavailable";diagnostics={error:String(error?.message||error)};}
     // Broad Google snippets can mix outbound and return flight numbers.
     // Keep the timetable empty unless the official airport board confirms the exact route.
     if(!flights.length)source+="; no verified result";
     const googleSearchUrl="https://www.google.com/search?q="+encodeURIComponent("Ryanair flight "+origin+" "+destination+" "+date+" flight number schedule");
-    return cors(JSON.stringify(daySchedule(date,flights,source,googleSearchUrl)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
+    return cors(JSON.stringify(daySchedule(date,flights,source,googleSearchUrl,diagnostics)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
    }
    if(u.pathname==="/api/history"){
     if(!env.FLYITALYADSB_API_KEY)return cors(JSON.stringify({error:"FLYITALYADSB_API_KEY secret is not configured on this Worker."}),503,{"Content-Type":"application/json"});
