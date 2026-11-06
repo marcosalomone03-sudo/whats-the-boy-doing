@@ -239,13 +239,22 @@
   }
   function aircraftCompatibility(ac, flight) {
     const type = String(ac.t || "").toUpperCase();
+    const call = normalizedCallsign(ac.flight);
+    const operator = String(ac.ownOp || ac.operator || "").toLowerCase();
     const callMatch = callsignMatchesFlight(ac.flight, flight.flightNumber);
-    if (isKnownAirbus(type)) return {ok:false, callMatch, typeMatch:false, reason:"Airbus is not compatible with this Ryanair flight"};
+    const groupCall = RYANAIR_CALLSIGN_PREFIXES.some(prefix => call.startsWith(prefix));
+    const operatorKnown = !!operator;
+    const operatorMatch = /ryanair|malta air|buzz|lauda|ryanair sun|ryanair uk/.test(operator);
+    if (isKnownAirbus(type)) return {ok:false, callMatch, groupCall, operatorMatch, typeMatch:false, reason:"Airbus excluded"};
     const typeMatch = RYANAIR_737_TYPES.has(type);
-    // Accept a verified Ryanair-group callsign with an unknown type, or a known 737
-    // whose route/time evidence is strong enough to remain a manual candidate.
-    if (!callMatch && !typeMatch) return {ok:false, callMatch, typeMatch, reason:"Neither Ryanair callsign nor compatible Boeing type verified"};
-    return {ok:true, callMatch, typeMatch};
+    // If the feed explicitly identifies a different operator, never treat it as a Ryanair candidate.
+    if (operatorKnown && !operatorMatch) return {ok:false, callMatch, groupCall, operatorMatch:false, typeMatch, reason:"Different operator"};
+    // A Ryanair-group callsign or operator is the strongest evidence. If neither is
+    // broadcast, a 737 is only provisionally eligible and must pass strict route/time scoring.
+    if (!callMatch && !groupCall && !operatorMatch && !typeMatch) {
+      return {ok:false, callMatch, groupCall, operatorMatch, typeMatch, reason:"No compatible aircraft evidence"};
+    }
+    return {ok:true, callMatch, groupCall, operatorMatch, typeMatch, operatorKnown};
   }
   async function findCandidates(flight) {
     const origin=airport(flight.origin), destination=airport(flight.destination);
@@ -283,13 +292,17 @@
       const fraction=Math.max(0,Math.min(1,geo.alongTrack/Math.max(1,geo.distance)));
       const track=numeric(ac.track);
       const headingDifference=track===null ? null : angleDiff(track,routeBearing);
-      if (headingDifference!==null && headingDifference>115 && !compatibility.callMatch) continue;
+      if (headingDifference!==null && headingDifference>75 && !compatibility.callMatch && !compatibility.groupCall && !compatibility.operatorMatch) continue;
+      // Unknown-operator 737s need a very tight positional, timing and heading match.
+      if (!compatibility.callMatch && !compatibility.groupCall && !compatibility.operatorMatch) {
+        if (geo.crossTrack > 28 || progressDifference > 0.18 || seen > 25 || (headingDifference !== null && headingDifference > 35)) continue;
+      }
       const onGround=ac.alt_baro === "ground";
       const altitude=onGround ? null : numeric(ac.alt_baro);
       const seen=numeric(ac.seen) ?? 999;
       const progressDifference=Math.abs(fraction-expectedFraction);
       const headingScore=headingDifference===null?0:headingDifference<35?18:headingDifference<65?10:headingDifference<90?2:-12;
-      const callScore=compatibility.callMatch?55:0;
+      const callScore=compatibility.callMatch?55:compatibility.groupCall?42:compatibility.operatorMatch?48:0;
       const typeScore=compatibility.typeMatch?18:0;
       const routeScore=Math.max(0,22-geo.crossTrack/3);
       const progressScore=Math.max(0,18-progressDifference*30);
@@ -347,7 +360,7 @@
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
-      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${esc(dep)} (${esc(f.origin)}) · ARR ${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} MATCH</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.callMatch?" · callsign verified":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
+      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${esc(dep)} (${esc(f.origin)}) · ARR ${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} MATCH</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.callMatch?" · flight callsign matched":ac.groupCall?" · Ryanair-group callsign":ac.operatorMatch?" · operator verified":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
     }).join("");
     el.querySelectorAll("[data-pick]").forEach(button=>button.addEventListener("click",()=>{
       const item=items[Number(button.dataset.pick)]; if(!item)return;
@@ -398,8 +411,8 @@
       const nowMs=Date.now();
       const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-120*60000&&nowMs<=f.arrival.getTime()+240*60000);
       if (!searchFlights.length) {
-        renderCandidates([],"No scheduled flight is within its live tracking window for this date. No unrelated aircraft are shown.");
-        $("connection").textContent="Timetable loaded · no flight inside the extended live window";
+        renderCandidates([],"No scheduled flight falls within the live tracking window. Check the duty sectors below: the timetable may be missing the flight or its scheduled times may differ.");
+        $("connection").textContent="Timetable loaded · no flight inside live window";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
         if (scheduleErrors.length) showError(scheduleErrors.join("\n"));
         return;
