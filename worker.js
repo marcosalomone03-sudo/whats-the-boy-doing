@@ -174,7 +174,7 @@ export default {
 
    if(u.pathname==="/api/pool"){
     const date=u.searchParams.get("date")||new Date().toISOString().slice(0,10);
-    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
     if(!env.AIRCRAFT_POOL)return cors(JSON.stringify({error:"AIRCRAFT_POOL KV binding is not configured"}),503,{"Content-Type":"application/json"});
     const pool=await env.AIRCRAFT_POOL.get(poolKey(date),"json");
     return cors(JSON.stringify(pool||{airport:"NUE",date,aircraft:{},aircraftCount:0,limitations:["No pool stored for this date yet."]}),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
