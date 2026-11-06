@@ -141,17 +141,21 @@ async function updatePool(env,day,from,to,mode){
  if(!env.AIRCRAFT_POOL||!env.FLYITALYADSB_API_KEY)throw new Error("AIRCRAFT_POOL KV or FlyItalyADSB key missing");
  const key=poolKey(day),old=await env.AIRCRAFT_POOL.get(key,"json")||{airport:"NUE",date:day,aircraft:{},observations:[]};
  const aircraft=old.aircraft||{},obs=old.observations||[];let accepted=0;
- for(const r of await poolFetch(env,from,to)){
+ const rows=await poolFetch(env,from,to),diagnostics={fetchedRows:rows.length,missingHex:0,unsupportedType:0,missingTime:0,accepted:0,firstRowKeys:rows[0]?Object.keys(rows[0]).slice(0,30):[],sampleTypes:[...new Set(rows.slice(0,100).map(r=>poolType(r)||"(empty)"))].slice(0,20)};
+ for(const r of rows){
   const hex=poolHex(r),type=poolType(r),time=poolTime(r);
-  if(!/^[0-9a-f]{6}$/.test(hex)||!["B738","B38M"].includes(type)||!time)continue;
+  if(!/^[0-9a-f]{6}$/.test(hex)){diagnostics.missingHex++;continue;}
+  if(!["B738","B38M"].includes(type)){diagnostics.unsupportedType++;continue;}
+  if(!time){diagnostics.missingTime++;continue;}
   const x=aircraft[hex]||{hex,firstSeen:time,observations:0};
   x.type=type;x.registration=r.r||r.registration||x.registration||null;x.lastSeen=time;x.observations++;x.evidence="NUE-area ADS-B observation only; not proof of landing, basing or flight assignment";
   aircraft[hex]=x;obs.push({hex,type,time,registration:x.registration});accepted++;
  }
+ diagnostics.accepted=accepted;
  const unique=[...new Map(obs.slice(-5000).map(x=>[x.hex+"|"+x.time,x])).values()];
- const value={airport:"NUE",date:day,updatedAt:new Date().toISOString(),mode,source:"FlyItalyADSB · 10 km NUE area",aircraft,aircraftCount:Object.keys(aircraft).length,observationCount:unique.length,observations:unique,limitations:["Area observation does not prove landing, takeoff, basing or flight assignment.","Only B738/B38M observations are retained.","Coverage gaps are possible."]};
+ const value={airport:"NUE",date:day,updatedAt:new Date().toISOString(),mode,source:"FlyItalyADSB - 10 km NUE area",diagnostics,aircraft,aircraftCount:Object.keys(aircraft).length,observationCount:unique.length,observations:unique,limitations:["Area observation does not prove landing, takeoff, basing or flight assignment.","Only B738/B38M observations are retained.","Coverage gaps are possible."]};
  await env.AIRCRAFT_POOL.put(key,JSON.stringify(value),{expirationTtl:259200});
- return {accepted,aircraftCount:value.aircraftCount};
+ return {accepted,aircraftCount:value.aircraftCount,diagnostics};
 }
 async function refreshPool(event,env){
  if(!env.AIRCRAFT_POOL||!env.FLYITALYADSB_API_KEY)return;
