@@ -22,16 +22,19 @@ function localNueTime(value){
 }
 function normalizeBoardRows(payload,origin,destination,date,direction){
  const rows=Array.isArray(payload)?payload:[];
- const expectedOther=origin==="NUE"?destination:origin;
+ const expectedFrom=origin==="NUE"?"NUE":origin;
+ const expectedTo=destination==="NUE"?"NUE":destination;
  const wantedDate=Number(dateCompact(date));
  return rows.map(row=>{
   const airline=String(row?.flight?.airline?.iata||"").toUpperCase();
   const numberPart=String(row?.flight?.number||"").replace(/\s/g,"");
   const number=airline+numberPart;
-  const other=String(direction==="departures"?row?.toAirport?.iata:row?.fromAirport?.iata||"").toUpperCase();
+  const from=String(row?.fromAirport?.iata||"").toUpperCase();
+  const to=String(row?.toAirport?.iata||"").toUpperCase();
   const localDate=Number(row?.scheduledLocalDate||0);
   if(!/^((FR|RK|RR|OE)\d{1,5})$/.test(number))return null;
-  if(other!==expectedOther||localDate!==wantedDate)return null;
+  // Validate both endpoints to prevent opposite-direction flights entering this route.
+  if(from!==expectedFrom||to!==expectedTo||localDate!==wantedDate)return null;
   const boardTime=localNueTime(row?.scheduledTime);
   if(!boardTime)return null;
   return {flightNumber:number,carrierCode:airline,boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,source:"Nuremberg Airport"};
