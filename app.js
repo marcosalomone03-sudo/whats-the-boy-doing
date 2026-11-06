@@ -257,52 +257,65 @@
   function renderObserved(message) {
     const el=$("observedFlights"); if(!el)return;
     if(!state.observed.length) { el.textContent=message||"FlyItalyADSB did not return aircraft near the selected airports in the scheduled time windows. Coverage gaps are possible; this does not prove the flight did not operate."; return; }
+    // Collapse all route/checkpoint duplicates into one row per ICAO HEX.
     const groups=new Map();
     for(const item of state.observed) {
-      const f=item.flight,hex=String(item.icao||item.hex||"").toLowerCase(),key=[f.flightNumber,f.origin,f.destination,hex].join("|");
-      if(!groups.has(key)) groups.set(key,{flight:f,hex,registration:item.r||"Registration unavailable",type:item.t||"Type unavailable",departure:false,arrival:false,records:[]});
-      const group=groups.get(key); group[item.checkpoint]=true; group.records.push(item);
+      const hex=String(item.icao||item.hex||"").toLowerCase();
+      if(!/^[0-9a-f]{6}$/.test(hex)) continue;
+      if(!groups.has(hex)) groups.set(hex,{hex,registration:item.r||"Registration unavailable",type:item.t||"Type unavailable",sightings:new Map(),records:[]});
+      const g=groups.get(hex); g.records.push(item);
+      const f=item.flight||{};
+      const code=item.checkpoint==="departure"?f.origin:f.destination;
+      const ap=airport(code);
+      const label=code?(code+(ap?.name?" ("+ap.name+")":"")):"Airport code unavailable";
+      const route=f.flightNumber?f.flightNumber+" "+(f.origin||"?")+"→"+(f.destination||"?"):"scheduled route unavailable";
+      const key=[label,item.checkpoint,route].join("|");
+      const time=item.closest_time;
+      const ms=typeof time==="number"?time*1000:Date.parse(time);
+      const timeText=Number.isFinite(ms)?new Date(ms).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable";
+      g.sightings.set(key,{label,checkpoint:item.checkpoint,route,timeText});
     }
     const lines=[...groups.values()].map(g=>{
-      const times=g.records.map(r=>r.closest_time?new Date(typeof r.closest_time==="number"?r.closest_time*1000:Date.parse(r.closest_time)).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable").join(", ");
-      const checkpoints=[g.departure?"near departure airport":"",g.arrival?"near arrival airport":""].filter(Boolean).join(" + ");
+      const sightings=[...g.sightings.values()].map(s=>"near "+s.label+" ("+(s.checkpoint==="departure"?"departure":"arrival")+" · "+s.route+") · "+s.timeText).join("\n");
       const track=g.records.find(r=>r.dailyTrace)?.dailyTrace;
-      const trackPoints=track?.trace||[];
-      const first=trackPoints.length?new Date((Number(track.timestamp)+Number(trackPoints[0][0]))*1000).toISOString().slice(11,16)+" UTC":"";
-      const last=trackPoints.length?new Date((Number(track.timestamp)+Number(trackPoints[trackPoints.length-1][0]))*1000).toISOString().slice(11,16)+" UTC":"";
-      const trackLine=trackPoints.length?"\nDaily track: "+trackPoints.length+" positions · "+first+"–"+last:"\nDaily track not available";
-      return g.flight.flightNumber+" · "+g.flight.origin+" → "+g.flight.destination+"\n"+g.registration+" · "+g.type+" · HEX "+g.hex+"\nObserved "+checkpoints+" · "+times+trackLine;
+      const points=Array.isArray(track?.trace)?track.trace:[];
+      const first=points.length?new Date((Number(track.timestamp)+Number(points[0][0]))*1000).toISOString().slice(11,16)+" UTC":"";
+      const last=points.length?new Date((Number(track.timestamp)+Number(points[points.length-1][0]))*1000).toISOString().slice(11,16)+" UTC":"";
+      const trackLine=points.length?"\nDaily track: "+points.length+" positions · "+first+"–"+last:"\nDaily track not available";
+      return g.registration+" · "+g.type+" · HEX "+g.hex+"\n"+sightings+trackLine;
     });
-    el.textContent=lines.join("\n\n")+"\n\nSource: FlyItalyADSB overflights (ADS-B/MLAT). Same ICAO observed near both airports is stronger evidence; one airport alone is not flight confirmation. Callsigns are not used to match flights."+(message?"\n\n"+message:"");
+    el.textContent=lines.join("\n\n")+"\n\nUnique aircraft are deduplicated by ICAO HEX. Airport labels identify the exact airport checked. An airport observation alone does not confirm a flight assignment; callsigns are not used to match flights."+(message?"\n\n"+message:"");
   }
-  function observedAircraftCandidates() {
-    const groups=new Map();
-    for (const item of state.observed) {
-      const flight=item.flight;
-      const hex=String(item.icao||item.hex||"").toLowerCase();
-      if (!flight || !/^[0-9a-f]{6}$/.test(hex)) continue;
-      const key=[flight.flightNumber,flight.origin,flight.destination,flight.date,hex].join("|");
-      if (!groups.has(key)) groups.set(key,{flight,hex,records:[],departure:false,arrival:false});
-      const group=groups.get(key);
-      group[item.checkpoint]=true;
-      group.records.push(item);
+    function observedAircraftCandidates() {
+    // Build a flight-specific evidence group first, then deduplicate globally by HEX.
+    const byFlight=new Map();
+    for(const item of state.observed) {
+      const f=item.flight, hex=String(item.icao||item.hex||"").toLowerCase();
+      if(!f||!/^[0-9a-f]{6}$/.test(hex)) continue;
+      const key=[f.flightNumber,f.origin,f.destination,f.date,hex].join("|");
+      if(!byFlight.has(key)) byFlight.set(key,{flight:f,hex,records:[],departure:false,arrival:false});
+      const g=byFlight.get(key);
+      if(item.checkpoint==="departure"||item.checkpoint==="arrival") g[item.checkpoint]=true;
+      g.records.push(item);
     }
-    const bothEnds=[...groups.values()].filter(g=>g.departure&&g.arrival);
-    const oneEnd=[...groups.values()].filter(g=>!(g.departure&&g.arrival)&&["B738","B38M","B737"].includes(String(g.records[0]?.t||"").toUpperCase()));
-    const ordered=[...bothEnds,...oneEnd].sort((a,b)=>(a.departure&&a.arrival?0:1)-(b.departure&&b.arrival?0:1));
-    return ordered.slice(0,6).map(g=>{
+    const bestByHex=new Map();
+    for(const g of byFlight.values()) {
+      // Do not label a single-airport sighting as a candidate for a specific flight.
+      if(!g.departure||!g.arrival) continue;
+      const times=g.records.map(r=>{const v=r.closest_time;return typeof v==="number"?v*1000:Date.parse(v);}).filter(Number.isFinite);
+      const score=times.length?Math.min(...times.map(t=>Math.abs(t-g.flight.departure.getTime())+Math.abs(t-g.flight.arrival.getTime()))):Number.POSITIVE_INFINITY;
+      const old=bestByHex.get(g.hex);
+      if(!old||score<old.score) bestByHex.set(g.hex,{...g,score});
+    }
+    return [...bestByHex.values()].map(g=>{
       const first=g.records[0]||{};
-      const times=g.records.map(r=>{
-        const value=r.closest_time;
-        const ms=typeof value==="number"?value*1000:Date.parse(value);
-        return Number.isFinite(ms)?new Date(ms).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable";
-      });
-      const trace=g.records.find(r=>r.dailyTrace)?.dailyTrace;
-      const points=Array.isArray(trace?.trace)?trace.trace.length:0;
-      return {flight:g.flight,aircraft:{hex:g.hex,r:first.r||null,t:first.t||null,flight:Array.isArray(first.callsigns)?first.callsigns[0]||"":String(first.callsigns||""),historicalOnly:true,observedBothEnds:!!(g.departure&&g.arrival),observedCheckpoints:[g.departure?"departure airport":"",g.arrival?"arrival airport":""].filter(Boolean).join(" + "),observedTimes:times,historicalPositions:points,crossTrack:0,score:g.departure&&g.arrival?100:40}};
+      const times=g.records.map(r=>{const v=r.closest_time;const ms=typeof v==="number"?v*1000:Date.parse(v);return Number.isFinite(ms)?new Date(ms).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable";});
+      const track=g.records.find(r=>r.dailyTrace)?.dailyTrace;
+      const points=Array.isArray(track?.trace)?track.trace.length:0;
+      return {flight:g.flight,aircraft:{hex:g.hex,r:first.r||null,t:first.t||null,flight:Array.isArray(first.callsigns)?first.callsigns[0]||"":String(first.callsigns||""),historicalOnly:true,observedBothEnds:true,observedCheckpoints:g.flight.origin+" departure + "+g.flight.destination+" arrival",observedTimes:times,historicalPositions:points,crossTrack:0,score:100}};
     });
   }
-  const EARTH_NM = 3440.065;
+    const EARTH_NM = 3440.065;
   const RAD = Math.PI/180;
   function hav(a,b) {
     const dLat=(b.lat-a.lat)*RAD, dLon=(b.lon-a.lon)*RAD;
