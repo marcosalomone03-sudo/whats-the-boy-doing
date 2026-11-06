@@ -54,7 +54,7 @@
     RAK:{name:"Marrakech",tz:"Africa/Casablanca",lat:31.6069,lon:-8.0363}
   };
 
-  const state = { flights:[], candidates:[], selected:null };
+  const state = { flights:[], candidates:[], selected:null, googleLinks:[] };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
@@ -361,7 +361,7 @@
   }
   function render() {
     const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();
-    $("sectors").innerHTML=flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)} · ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small></div><div class="time">${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>arr ${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</small></div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`;
+    $("sectors").innerHTML=(flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)} · ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small></div><div class="time">${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>arr ${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</small></div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`)+(state.googleLinks.length?`<div class="notice">Google fallback searches (open if a route is missing): ${state.googleLinks.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.route)} ↗</a>`).join(" · ")}</div>`:"");
     $("sectorCount").textContent=flights.length+" SECTORS";
     const next=flights.find(f=>f.departure>now);
     $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
@@ -412,7 +412,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null;
+    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[];
     $("candidates").className="empty"; $("candidates").textContent="Searching timetable and live aircraft…";
     $("connection").textContent="Checking timetable…"; $("lastUpdated").textContent="SEARCHING";
     try {
