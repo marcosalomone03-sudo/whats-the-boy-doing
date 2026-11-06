@@ -394,12 +394,18 @@
   async function aircraftIdentity(hex) {
     return get(`/api/identity?icao=${encodeURIComponent(hex)}`);
   }
-  function ryanairGroupIdentity(identity) {
+  function ryanairGroupIdentity(identity, registration) {
     const owner=String(identity?.registeredOwner||identity?.registered_owner||"").toLowerCase();
     const flag=String(identity?.operatorFlagCode||identity?.operator_flag_code||"").toUpperCase();
+    const reg=String(registration||identity?.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    // Ryanair Group fleet registrations are currently EI-, 9H- and SP-.
+    // Registration is only a preliminary fleet filter: registry owner/flag
+    // must independently identify a Ryanair Group operator.
+    const prefixMatch=/^(EI|9H|SP)/.test(reg);
     const ownerMatch=/ryanair|malta air|buzz|ryanair uk|ryanair sun/.test(owner);
     const flagMatch=new Set(["RYR","RUK","RYS","MAY"]).has(flag);
-    return {ok:ownerMatch||flagMatch,owner:identity?.registeredOwner||identity?.registered_owner||"",flag};
+    return {ok:prefixMatch&&(ownerMatch||flagMatch),prefixMatch,ownerMatch,flagMatch,registration:reg,
+      owner:identity?.registeredOwner||identity?.registered_owner||"",flag};
   }
   async function findCandidates(flight) {
     const origin=airport(flight.origin), destination=airport(flight.destination);
@@ -477,9 +483,10 @@
     const checked=await Promise.all(candidates.slice(0,10).map(async ac=>{
       try {
         const identity=await aircraftIdentity(ac.hex);
-        const match=ryanairGroupIdentity(identity);
-        return {...ac,operatorMatch:match.ok,poolMatch:!!state.pool?.[String(ac.hex).toLowerCase()],operatorName:match.owner||match.flag||"Unknown",identitySource:identity.source||"Aircraft registry",
-          r:ac.r||identity.registration||null,t:ac.t||identity.aircraftType||null};
+        const registration=ac.r||identity.registration||null;
+        const match=ryanairGroupIdentity(identity,registration);
+        return {...ac,operatorMatch:match.ok,registrationPrefixMatch:match.prefixMatch,poolMatch:!!state.pool?.[String(ac.hex).toLowerCase()],operatorName:match.owner||match.flag||"Unknown",identitySource:identity.source||"Aircraft registry",
+          r:registration,t:ac.t||identity.aircraftType||null};
       } catch(error) {
         return {...ac,operatorMatch:false,operatorName:"Unverified",identityError:error.message};
       }
