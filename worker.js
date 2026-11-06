@@ -4,7 +4,7 @@
  * ADS-B.lol is used only after a scheduled flight has been identified.
  */
 function dateCompact(date){return date.replace(/-/g,"");}
-function daySchedule(date,flights,source){return {source,days:[{day:Number(date.slice(-2)),flights}]};}
+function daySchedule(date,flights,source,googleSearchUrl){return {source,googleSearchUrl,days:[{day:Number(date.slice(-2)),flights}]};}
 function pick(obj,keys){for(const k of keys){const v=obj?.[k];if(v!==undefined&&v!==null&&String(v).trim()!=="")return v;}return "";}
 function time24(value){
  const s=String(value||"").trim();
@@ -15,45 +15,39 @@ function time24(value){
  if(ampm==="am"&&h===12)h=0;
  return String(h).padStart(2,"0")+":"+mi;
 }
+function localNueTime(value){
+ const date=new Date(value);
+ if(!Number.isFinite(date.getTime()))return "";
+ return new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Berlin",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(date);
+}
 function normalizeBoardRows(payload,origin,destination,date,direction){
- let rows=Array.isArray(payload)?payload:[];
- if(!rows.length){
-  for(const key of ["flights","items","results","data","departures","arrivals"])if(Array.isArray(payload?.[key])){rows=payload[key];break;}
- }
+ const rows=Array.isArray(payload)?payload:[];
  const expectedOther=origin==="NUE"?destination:origin;
+ const wantedDate=Number(dateCompact(date));
  return rows.map(row=>{
-  const numberRaw=String(pick(row,["flightNumber","flightNo","flight","number","iataFlightNumber","flight_number"])).replace(/\s/g,"").toUpperCase();
-  const carrier=String(pick(row,["airlineIata","carrierCode","iataAirline","airlineCode","carrier"])||numberRaw.match(/^[A-Z]{2,3}/)?.[0]||"").toUpperCase();
-  const number=/^[A-Z]{2,3}\d/.test(numberRaw)?numberRaw:carrier+numberRaw;
-  const other=String(pick(row,origin==="NUE"?["destinationIata","destination","airportIata","iataOther","to"]:["originIata","origin","airportIata","iataOther","from"])).toUpperCase();
-  if(!/^((FR|RK)\d{1,5})$/.test(number))return null;
-  if(other&&other!==expectedOther)return null;
-  const boardTime=time24(pick(row,["scheduledTime","scheduled","scheduledAt","scheduled_time","time","departureTime","arrivalTime","estimatedTime","estimated"]));
+  const airline=String(row?.flight?.airline?.iata||"").toUpperCase();
+  const numberPart=String(row?.flight?.number||"").replace(/\\s/g,"");
+  const number=airline+numberPart;
+  const other=String(direction==="departures"?row?.toAirport?.iata:row?.fromAirport?.iata||"").toUpperCase();
+  const localDate=Number(row?.scheduledLocalDate||0);
+  if(!/^((FR|RK)\\d{1,5})$/.test(number))return null;
+  if(other!==expectedOther||localDate!==wantedDate)return null;
+  const boardTime=localNueTime(row?.scheduledTime);
   if(!boardTime)return null;
-  return {flightNumber:number,carrierCode:carrier||number.slice(0,2),boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,source:"Nuremberg Airport"};
+  return {flightNumber:number,carrierCode:airline,boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,source:"Nuremberg Airport"};
  }).filter(Boolean);
 }
 async function nurembergFlights(origin,destination,date){
  if(origin!=="NUE"&&destination!=="NUE")return [];
  const direction=origin==="NUE"?"departures":"arrivals";
+ const other=origin==="NUE"?destination:origin;
  const base="https://airportnue-service.justrelate.io/production/api/flight-status/"+direction;
  const headers={"Accept":"application/json, text/plain, */*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status","User-Agent":"Mozilla/5.0"};
- const dateFormats=[dateCompact(date),date];
- for(const dateValue of dateFormats){
-  const url=base+"?lang=en&airportIata=NUE&flightNumber=&date="+encodeURIComponent(dateValue)+"&hourMin=&hourMax=";
-  const response=await fetch(url,{headers,cf:{cacheTtl:60,cacheEverything:true}});
-  if(!response.ok)continue;
-  let payload;try{payload=await response.json();}catch{continue;}
-  const rows=normalizeBoardRows(payload,origin,destination,date,direction);
-  if(rows.length)return rows;
- }
- return [];
-}
-function stripHtml(html){
- return html.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ")
-  .replace(/<[^>]+>/g," ").replace(/&nbsp;|&#160;/gi," ").replace(/&amp;/gi,"&")
-  .replace(/&#39;|&apos;/gi,"'").replace(/&quot;/gi,'"').replace(/&lt;/gi,"<").replace(/&gt;/gi,">")
-  .replace(/\s+/g," ").trim();
+ const url=base+"?lang=en&airportIata="+encodeURIComponent(other)+"&flightNumber=&date="+dateCompact(date)+"&hourMin=&hourMax=";
+ const response=await fetch(url,{headers,cf:{cacheTtl:60,cacheEverything:true}});
+ if(!response.ok)throw new Error("Nuremberg board HTTP "+response.status);
+ const payload=await response.json();
+ return normalizeBoardRows(payload,origin,destination,date,direction);
 }
 async function googleFlights(origin,destination,date){
  if(origin!=="NUE"&&destination!=="NUE")return [];
@@ -98,7 +92,7 @@ export default {
      source+="; Google Search fallback";
      try{flights=await googleFlights(origin,destination,date);}catch(error){source+=" unavailable";}
     }
-    return cors(JSON.stringify(daySchedule(date,flights,source)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
+    const googleSearchUrl="https://www.google.com/search?q="+encodeURIComponent("Ryanair flight "+origin+" "+destination+" "+date+" flight number schedule");\n    return cors(JSON.stringify(daySchedule(date,flights,source,googleSearchUrl)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
    }
    let target;
    if(u.pathname==="/api/aircraft"){
