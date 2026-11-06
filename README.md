@@ -17,7 +17,7 @@ For each route and selected date, the Cloudflare Worker:
 2. If the official board returns no matching flight, it attempts a **Google Search fallback** for the route, date, airline and flight number.
 3. Returns the flight number and the available board time to the app. If only one endpoint time is available, the app estimates the other time and marks it with `~`.
 
-Google Search is an opportunistic fallback, not an authoritative timetable API. Results are accepted only when a Ryanair-group flight number and a time can be extracted from the returned search text. Google may block automated requests or return incomplete/ambiguous snippets; in that case the app reports no result rather than inventing a flight.
+Google Search is an opportunistic fallback, not an authoritative timetable API. Results are accepted only when a Ryanair-group flight number and a time can be extracted from the returned search text. Google may block automated requests or return incomplete/ambiguous snippets. The app therefore also exposes a direct Google results link for each route when the schedule is missing; a manual result is not treated as verified until its flight number and time are checked.
 
 ## Aircraft tracking
 
