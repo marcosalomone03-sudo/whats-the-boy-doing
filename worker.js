@@ -91,10 +91,9 @@ export default {
     if(!/^[A-Z]{3}$/.test(origin)||!/^[A-Z]{3}$/.test(destination)||!(origin==="NUE"||destination==="NUE")||!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid schedule parameters; every tracked route must touch NUE and include a date."}),400,{"Content-Type":"application/json"});
     let flights=[],source="Nuremberg Airport";
     try{flights=await nurembergFlights(origin,destination,date);}catch(error){source="Nuremberg Airport unavailable";}
-    if(!flights.length){
-     source+="; Google Search fallback";
-     try{flights=await googleFlights(origin,destination,date);}catch(error){source+=" unavailable";}
-    }
+    // Broad Google snippets can mix outbound and return flight numbers.
+    // Keep the timetable empty unless the official airport board confirms the exact route.
+    if(!flights.length)source+="; no verified result";
     const googleSearchUrl="https://www.google.com/search?q="+encodeURIComponent("Ryanair flight "+origin+" "+destination+" "+date+" flight number schedule");
     return cors(JSON.stringify(daySchedule(date,flights,source,googleSearchUrl)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
    }
