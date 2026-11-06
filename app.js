@@ -54,7 +54,7 @@
     RAK:{name:"Marrakech",tz:"Africa/Casablanca",lat:31.6069,lon:-8.0363}
   };
 
-  const state = { flights:[], candidates:[], selected:null, googleLinks:[] };
+  const state = { flights:[], candidates:[], selected:null, googleLinks:[], observed:[] };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
@@ -212,6 +212,21 @@
     return normalizeSchedule(data,origin,destination,date);
   }
 
+  async function loadObserved(date) {
+    state.observed=[];
+    const now=new Date(); const today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
+    if(date>=today){renderObserved('Same-day observed-flight lookup is being prepared; live ADS-B is still checked below. Historical airport records become available after the next processing cycle.');return;}
+    const results=await Promise.all(['departures','arrivals'].map(type=>get('/api/observed?airport=NUE&type='+type+'&date='+encodeURIComponent(date))));
+    const rows=results.flatMap(x=>Array.isArray(x)?x:(x.flights||x.results||x.items||[]));
+    for(const f of state.flights)for(const r of rows){if(String(r?.from?.iata||'').toUpperCase()!==f.origin||String(r?.to?.iata||'').toUpperCase()!==f.destination)continue;state.observed.push({flight:f,record:r});}
+    renderObserved();
+  }
+  function renderObserved(message) {
+    const el=$('observedFlights');if(!el)return;
+    if(message){el.textContent=message;return;}
+    if(!state.observed.length){el.textContent='No matching aircraft observations returned. Receiver coverage can be incomplete; this does not prove the flight did not operate.';return;}
+    el.textContent=state.observed.map(x=>{const r=x.record,f=x.flight;const dep=r.from?.time?fmt(new Date(Number(r.from.time)*1000),airport(f.origin).tz):'—';const arr=r.to?.time?fmt(new Date(Number(r.to.time)*1000),airport(f.destination).tz):'—';return f.origin+' → '+f.destination+' | '+(r.r||'Registration unavailable')+' | '+(r.t||'Type unavailable')+' | HEX '+(r.icao||'—')+' | DEP '+dep+' ('+(r.from?.seen||'—')+') | ARR '+arr+' ('+(r.to?.seen||'—')+')';}).join('\n\n')+'\n\nTimes are ADS-B observations near airports, not airline-confirmed touchdown times. No callsign matching is used.';
+  }
   const EARTH_NM = 3440.065;
   const RAD = Math.PI/180;
   function hav(a,b) {
@@ -436,7 +451,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[];
+    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; renderObserved('Loading observed flight history…');
     $("candidates").className="empty"; $("candidates").textContent="Searching timetable and live aircraft…";
     $("connection").textContent="Checking timetable…"; $("lastUpdated").textContent="SEARCHING";
     try {
@@ -444,6 +459,7 @@
       const scheduleErrors=[];
       responses.forEach((r,i)=>{ if(r.status==="fulfilled")state.flights.push(...r.value); else scheduleErrors.push(`${routes[i].join("-")}: ${r.reason?.message||"schedule unavailable"}`); });
       state.flights.sort((a,b)=>a.departure-b.departure); render();
+      try { await loadObserved(date); } catch(e) { renderObserved('Observed flight history unavailable: '+(e.message||'API error')); }
       const deviceNow=new Date();
       const today=[deviceNow.getFullYear(),String(deviceNow.getMonth()+1).padStart(2,"0"),String(deviceNow.getDate()).padStart(2,"0")].join("-");
       if (date !== today) {
