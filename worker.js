@@ -132,7 +132,7 @@ function poolHex(r){return String(r?.icao||r?.hex||r?.hex_id||r?.icao24||"").toL
 function poolType(r){return String(r?.t||r?.type||r?.aircraft_type||r?.icao_type||"").toUpperCase();}
 function poolTime(r){const v=r?.closest_time??r?.timestamp??r?.time??r?.seen;if(typeof v==="number")return new Date(v<1e12?v*1000:v).toISOString();const d=new Date(v);return Number.isFinite(d.getTime())?d.toISOString():null;}
 async function poolFetch(env,from,to){
- const url="https://api.flyitalyadsb.com/v2/overflights?lat=49.4987&lon=11.0780&dist=10&from="+encodeURIComponent(from.toISOString())+"&to="+encodeURIComponent(to.toISOString());
+ const url="https://api.flyitalyadsb.com/v2/overflights?lat=49.4987&lon=11.0780&dist=10&from="+encodeURIComponent(from.toISOString())+"&to="+encodeURIComponent(to.toISOString())+"&limit=500";
  const r=await fetch(url,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/15.0"}});
  const body=await r.text();let payload;
  try{payload=JSON.parse(body);}catch{throw new Error("FlyItalyADSB returned non-JSON HTTP "+r.status+": "+body.slice(0,180));}
