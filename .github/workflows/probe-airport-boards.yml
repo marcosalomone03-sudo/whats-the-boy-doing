@@ -1,0 +1,58 @@
+name: Probe official airport flight boards
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/probe-airport-boards.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Inspect public airport board responses
+        run: |
+          node --input-type=module <<'NODE'
+          const targets = [
+            ["AENA-ALC", "https://www.aena.es/en/flight-info.html?iata=ALC"],
+            ["AENA-PMO", "https://www.aena.es/en/flight-info.html?iata=PMO"],
+            ["AENA-AGP", "https://www.aena.es/en/flight-info.html?iata=AGP"],
+            ["BUD-DEPARTURES", "https://www.bud.hu/en/departures"],
+            ["BUD-ARRIVALS", "https://www.bud.hu/en/arrivals"],
+            ["STN-DEPARTURES", "https://www.stanstedairport.co.uk/departures/"],
+            ["STN-ARRIVALS", "https://www.stanstedairport.co.uk/arrivals/"],
+            ["NUE-FLIGHT-STATUS", "https://www.airport-nuernberg.de/en/flight-status"]
+          ];
+          for (const [name, url] of targets) {
+            try {
+              const response = await fetch(url, {
+                headers: {
+                  "User-Agent": "Mozilla/5.0 (compatible; WTBD-AirportBoardProbe/1.0)",
+                  "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"
+                },
+                redirect: "follow",
+                signal: AbortSignal.timeout(20000)
+              });
+              const html = await response.text();
+              const title = html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1]?.replace(/<[^>]+>/g," ").replace(/\\s+/g," ").trim() || "";
+              const scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m => m[1]);
+              const apiHints = [...new Set((html.match(/(?:https?:)?\\/\\/[^"'\\s<>]+|\\/(?:api|flight|flights|departures|arrivals)[^"'\\s<>]*/gi)||[])
+                .filter(s => /api|flight|depart|arriv|aena|airport|mag|bud/i.test(s)))].slice(0,30);
+              const flightRefs = [...new Set((html.match(/\\b(?:FR|RK|W6|LS|U2|EW|LH|BA|VY|IB|OS|TK)\\s?\\d{2,5}\\b/g)||[]))].slice(0,25);
+              console.log("\\n### "+name);
+              console.log("HTTP", response.status, "URL", response.url, "BYTES", html.length, "TYPE", response.headers.get("content-type"));
+              console.log("TITLE", title);
+              console.log("FLIGHT REFERENCES", flightRefs.join(", ") || "(none in initial HTML)");
+              console.log("SCRIPT SOURCES", JSON.stringify(scripts.slice(-30)));
+              console.log("ENDPOINT HINTS", JSON.stringify(apiHints));
+              console.log("BODY SAMPLE", html.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;|&#160;/g," ").replace(/\\s+/g," ").slice(0,1000));
+            } catch (error) {
+              console.log("\\n### "+name+" ERROR "+String(error));
+            }
+          }
+          NODE
