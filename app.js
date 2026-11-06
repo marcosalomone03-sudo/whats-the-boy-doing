@@ -8,7 +8,7 @@
   const ROUTE_RE = /^[A-Z]{3}(?:-[A-Z]{3})?$/;
   const STORAGE_KEY = "wtbd-selected-v2";
 
-  const AIRPORTS = {
+  let AIRPORTS = {
     NUE:{name:"Nuremberg",tz:"Europe/Berlin",lat:49.4987,lon:11.0780},
     BUD:{name:"Budapest",tz:"Europe/Budapest",lat:47.4369,lon:19.2556},
     ALC:{name:"Alicante",tz:"Europe/Madrid",lat:38.2822,lon:-0.5582},
@@ -59,6 +59,19 @@
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
   function airport(code) { return AIRPORTS[code] || null; }
+  let airportCataloguePromise = null;
+  function loadAirportCatalogue() {
+    if (!airportCataloguePromise) airportCataloguePromise = fetch("./airports.json",{cache:"no-store"})
+      .then(response=>response.ok?response.json():[])
+      .then(rows=>{
+        if (Array.isArray(rows)) for (const item of rows) {
+          if (!item || !/^[A-Z]{3}$/.test(item.iata||"") || !Number.isFinite(Number(item.lat)) || !Number.isFinite(Number(item.lon)) || !item.tz) continue;
+          AIRPORTS[item.iata]={name:item.name||item.city||item.iata,tz:item.tz,lat:Number(item.lat),lon:Number(item.lon)};
+        }
+      }).catch(error=>console.warn("Airport catalogue unavailable; using bundled airports",error));
+    return airportCataloguePromise;
+  }
+
   function routesFor(value) {
     const parts = value.split("-");
     return parts.length === 1
@@ -231,9 +244,12 @@
     const along = Math.atan2(Math.sin(d13)*Math.cos(delta),Math.cos(d13))*EARTH_NM;
     return {crossTrack:Math.abs(cross),alongTrack:along,distance};
   }
+  function positionAge(a) {
+    return numeric(a?.seen_pos) ?? numeric(a?.seen) ?? 999;
+  }
   function validAircraft(a) {
-    const lat=numeric(a?.lat), lon=numeric(a?.lon), seen=numeric(a?.seen);
-    return !!(a && typeof a.hex === "string" && /^[0-9a-f]{6}$/i.test(a.hex) && lat !== null && lon !== null && Math.abs(lat)<=90 && Math.abs(lon)<=180 && (seen===null || seen<90));
+    const lat=numeric(a?.lat), lon=numeric(a?.lon), seen=numeric(a?.seen), seenPos=positionAge(a);
+    return !!(a && typeof a.hex === "string" && /^[0-9a-f]{6}$/i.test(a.hex) && lat !== null && lon !== null && Math.abs(lat)<=90 && Math.abs(lon)<=180 && (seen===null || seen<60) && seenPos<=45);
   }
   async function aircraftNear(point,dist) {
     return get(`/api/aircraft?lat=${encodeURIComponent(point.lat)}&lon=${encodeURIComponent(point.lon)}&dist=${dist}`);
@@ -292,7 +308,7 @@
       for (const ac of (result.value?.ac || [])) {
         if (!validAircraft(ac)) continue;
         const old=map.get(ac.hex);
-        if (!old || (numeric(ac.seen) ?? 999)<(numeric(old.seen) ?? 999)) map.set(ac.hex,ac);
+        if (!old || positionAge(ac)<positionAge(old)) map.set(ac.hex,ac);
       }
     }
     if (!map.size && failures.length===results.length) throw new Error(failures[0]);
@@ -313,12 +329,27 @@
       const fraction=Math.max(0,Math.min(1,geo.alongTrack/Math.max(1,geo.distance)));
       const track=numeric(ac.track);
       const headingDifference=track===null ? null : angleDiff(track,routeBearing);
-      if (headingDifference!==null && headingDifference>75 && !compatibility.callMatch && !compatibility.groupCall && !compatibility.operatorMatch) continue;
       const onGround=ac.alt_baro === "ground";
       const altitude=onGround ? null : numeric(ac.alt_baro);
       const seen=numeric(ac.seen) ?? 999;
+      const seenPos=positionAge(ac);
       const progressDifference=Math.abs(fraction-expectedFraction);
-      // Unknown-operator 737s need a very tight positional, timing and heading match.
+      const distanceToOrigin=hav(origin,pos);
+      const distanceToDestination=hav(destination,pos);
+      // A callsign match is not enough: aircraft direction must agree with the scheduled leg.
+      // Near either airport, turns and runway alignment make heading less decisive.
+      const nearEndpoint=Math.min(distanceToOrigin,distanceToDestination)<=18;
+      if (!onGround && headingDifference!==null && headingDifference>105 && !nearEndpoint) continue;
+      // Reject stale positions even if the transponder is still being heard.
+      if (seenPos>30) continue;
+      // Once the scheduled arrival has passed, do not keep presenting an airborne aircraft
+      // far from destination as that flight. This prevents an opposite-direction leg winning.
+      const minutesAfterArrival=(now-flight.arrival.getTime())/60000;
+      if (!onGround && minutesAfterArrival>12 && distanceToDestination>22) continue;
+      if (!onGround && minutesAfterArrival>30) continue;
+      // All aircraft need a plausible progress estimate; exact callsigns cannot override it.
+      if (!onGround && progressDifference>0.32 && !nearEndpoint) continue;
+      // Unknown-operator 737s need an especially tight positional, timing and heading match.
       if (!compatibility.callMatch && !compatibility.groupCall && !compatibility.operatorMatch) {
         if (geo.crossTrack > 28 || progressDifference > 0.18 || seen > 25 || (headingDifference !== null && headingDifference > 35)) continue;
       }
@@ -327,12 +358,12 @@
       const typeScore=compatibility.typeMatch?18:0;
       const routeScore=Math.max(0,22-geo.crossTrack/3);
       const progressScore=Math.max(0,18-progressDifference*30);
-      const freshnessScore=Math.max(0,12-seen/8);
+      const freshnessScore=Math.max(0,14-seenPos/4);
       const groundPenalty=onGround && fraction>0.12 && fraction<0.88 ? 20:0;
       const score=callScore+typeScore+routeScore+progressScore+headingScore+freshnessScore-groundPenalty;
       if (score < 28) continue;
       const confidence=score>=90?"HIGH":score>=60?"MEDIUM":"LOW";
-      candidates.push({...ac,score,confidence,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,routeBearing,headingDifference,altitude,onGround,callMatch:compatibility.callMatch,typeMatch:compatibility.typeMatch,expectedFraction});
+      candidates.push({...ac,score,confidence,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,routeBearing,headingDifference,altitude,onGround,seenPos,callMatch:compatibility.callMatch,typeMatch:compatibility.typeMatch,expectedFraction});
     }
     return candidates.sort((a,b)=>b.score-a.score).slice(0,3);
   }
@@ -357,7 +388,7 @@
         <div class="stat"><small>Altitude</small><strong>${onGround?"GROUND":altitude===null?"—":Math.round(altitude).toLocaleString()+" ft"}</strong></div>
         <div class="stat"><small>Latitude</small><strong>${lat===null?"—":lat.toFixed(4)}</strong></div>
         <div class="stat"><small>Longitude</small><strong>${lon===null?"—":lon.toFixed(4)}</strong></div>
-      </div><div class="notice">ADS-B position age: ${Math.round(numeric(ac.seen)||0)} seconds. This is observational data, not airline-confirmed flight status.</div>`;
+      </div><div class="notice">ADS-B position age: ${Math.round(positionAge(ac))} seconds. This is observational data, not airline-confirmed flight status.</div>`;
   }
   function render() {
     const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();
@@ -409,6 +440,7 @@
     const date=$("flightDate").value;
     if (!ROUTE_RE.test(route)) { showError("Enter one airport code (BUD) or two (BUD-ALC)."); return; }
     if (!date) { showError("Choose a duty date."); return; }
+    await loadAirportCatalogue();
     const routes=routesFor(route);
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
