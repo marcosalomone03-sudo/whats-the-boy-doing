@@ -176,8 +176,28 @@ export default {
     const date=u.searchParams.get("date")||new Date().toISOString().slice(0,10);
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
     if(!env.AIRCRAFT_POOL)return cors(JSON.stringify({error:"AIRCRAFT_POOL KV binding is not configured"}),503,{"Content-Type":"application/json"});
-    const pool=await env.AIRCRAFT_POOL.get(poolKey(date),"json");
-    return cors(JSON.stringify(pool||{airport:"NUE",date,aircraft:{},aircraftCount:0,limitations:["No pool stored for this date yet."]}),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
+    let pool=await env.AIRCRAFT_POOL.get(poolKey(date),"json");
+    // On first request of the current UTC day, bootstrap the pool from the latest six hours.
+    // A short KV lock prevents ordinary concurrent page loads from duplicating the upstream query.
+    const today=new Date().toISOString().slice(0,10);
+    if(!pool&&date===today){
+     const lockKey=poolKey(date)+":bootstrap-lock";
+     const locked=await env.AIRCRAFT_POOL.get(lockKey);
+     if(!locked){
+      await env.AIRCRAFT_POOL.put(lockKey,"1",{expirationTtl:120});
+      try{
+       if(!env.FLYITALYADSB_API_KEY)throw new Error("FLYITALYADSB_API_KEY secret is missing");
+       const to=new Date(Date.now()-60000),from=new Date(to.getTime()-6*3600000);
+       await updatePool(env,date,from,to,"on-demand-bootstrap");
+       pool=await env.AIRCRAFT_POOL.get(poolKey(date),"json");
+      }catch(e){
+       return cors(JSON.stringify({error:"Initial pool collection failed",detail:String(e?.message||e)}),502,{"Content-Type":"application/json","Cache-Control":"no-store"});
+      }finally{
+       await env.AIRCRAFT_POOL.delete(lockKey);
+      }
+     }
+    }
+    return cors(JSON.stringify(pool||{airport:"NUE",date,aircraft:{},aircraftCount:0,limitations:["No pool stored for this date yet; initial collection may still be running or this is not the current UTC date."]}),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
    }
    if(u.pathname==="/api/schedule"){
     const origin=(u.searchParams.get("origin")||"").toUpperCase(),destination=(u.searchParams.get("destination")||"").toUpperCase(),date=u.searchParams.get("date")||"";
