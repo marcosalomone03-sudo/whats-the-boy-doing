@@ -53,6 +53,11 @@ jobs:
             console.log("INFO",origin+"-"+destination,"source:",data.source,"flights:",flights.map(f=>f.flightNumber).join(", ")||"none");
             if(!data.source||(!data.source.includes("Nuremberg Airport")&&!data.source.includes("Google Search")))throw new Error("Schedule source metadata missing");
           }
+          const pmo=await request("/api/schedule?origin=PMO&destination=NUE&year=2026&month=11&date=2026-11-06");
+          const pmoFlights=pmo.data.days.flatMap(day=>day.flights||[]).map(f=>f.flightNumber);
+          console.log("INFO PMO-NUE 2026-11-06 source:",pmo.data.source,"flights:",pmoFlights.join(", ")||"none");
+          if(!pmoFlights.includes("FR904"))throw new Error("Official NUE arrivals board did not recover expected FR904 on 2026-11-06");
+
           const aircraft=await request("/api/aircraft?lat=49.4987&lon=11.078&dist=35");
           if(!Array.isArray(aircraft.data.ac))throw new Error("ADS-B response missing ac[]");
           console.log("INFO ADS-B aircraft near NUE:",aircraft.data.ac.length);
