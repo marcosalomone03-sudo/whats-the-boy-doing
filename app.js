@@ -260,10 +260,18 @@
   function normalizedCallsign(value) {
     return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   }
+  // Some flights are broadcast with an operational callsign that does not
+  // contain the public flight number. Keep confirmed exceptions explicit.
+  const KNOWN_CALLSIGN_ALIASES = {
+    FR1130: ["RYR5RH"]
+  };
   function callsignMatchesFlight(value, flightNumber) {
     const call = normalizedCallsign(value);
-    const digits = String(flightNumber || "").replace(/^[A-Z]+/, "").replace(/\D/g, "");
-    if (!call || !digits) return false;
+    const flight = String(flightNumber || "").toUpperCase().replace(/\s+/g, "");
+    if (!call || !flight) return false;
+    if ((KNOWN_CALLSIGN_ALIASES[flight] || []).some(alias => normalizedCallsign(alias) === call)) return true;
+    const digits = flight.replace(/^[A-Z]+/, "").replace(/\D/g, "");
+    if (!digits) return false;
     return RYANAIR_CALLSIGN_PREFIXES.some(prefix => {
       if (!call.startsWith(prefix)) return false;
       const suffix = call.slice(prefix.length).replace(/[A-Z]+$/, "");
