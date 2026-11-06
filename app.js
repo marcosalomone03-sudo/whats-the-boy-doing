@@ -54,7 +54,7 @@
     RAK:{name:"Marrakech",tz:"Africa/Casablanca",lat:31.6069,lon:-8.0363}
   };
 
-  const state = { flights:[], candidates:[], selected:null, googleLinks:[], observed:[] };
+  const state = { flights:[], candidates:[], selected:null, googleLinks:[], observed:[], scheduleDiagnostics:[] };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
@@ -211,6 +211,7 @@
   async function loadRoute(origin,destination,date) {
     const [year,month] = date.split("-");
     const data = await get(`/api/schedule?origin=${origin}&destination=${destination}&year=${year}&month=${Number(month)}&date=${encodeURIComponent(date)}`);
+    state.scheduleDiagnostics.push({route:origin+"-"+destination,...(data.diagnostics||{}),source:data.source||"Schedule"});
     return normalizeSchedule(data,origin,destination,date);
   }
 
@@ -553,7 +554,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[];
+    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[];
     $("observedFlights").textContent="Airport arrival checks are disabled: the app never queries future observations.";
     $("candidates").className="empty"; $("candidates").textContent="Searching timetable and current ADS-B positions…";
     $("connection").textContent="Checking timetable…"; $("lastUpdated").textContent="SEARCHING";
@@ -562,6 +563,15 @@
       const scheduleErrors=[];
       responses.forEach((r,i)=>{ if(r.status==="fulfilled")state.flights.push(...r.value); else scheduleErrors.push(`${routes[i].join("-")}: ${r.reason?.message||"schedule unavailable"}`); });
       state.flights.sort((a,b)=>a.departure-b.departure); render();
+      if(!state.flights.length){
+        const d=state.scheduleDiagnostics[0]||{};
+        const detail=d.error||("API rows: "+(d.rowCount??"?")+"; accepted: "+(d.acceptedCount??0)+"; fields: "+((d.firstRowKeys||[]).join(", ")||"no row fields")+"; response keys: "+((d.topLevelKeys||[]).join(", ")||d.payloadType||"unknown"));
+        $("connection").textContent="Timetable empty · "+detail;
+        $("lastUpdated").textContent="SCHEDULE CHECKED";
+        renderCandidates([],"No verified timetable sectors were returned by the Nuremberg Airport board.");
+        showError("NUE timetable diagnostic ("+(d.route||"route")+"): "+detail);
+        return;
+      }
       const deviceNow=new Date();
       const today=[deviceNow.getFullYear(),String(deviceNow.getMonth()+1).padStart(2,"0"),String(deviceNow.getDate()).padStart(2,"0")].join("-");
       if (date !== today) {
