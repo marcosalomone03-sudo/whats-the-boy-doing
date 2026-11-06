@@ -34,8 +34,8 @@ function boardRows(payload){
 }
 function boardAirport(row,side){
  const paths=side==="from"
-  ?[row?.fromAirport?.iata,row?.departureAirport?.iata,row?.origin?.iata,row?.departure?.airport?.iata,row?.departure?.airportIata,row?.departureAirportIata,row?.departureAirportCode,row?.departureIata,row?.originIata,row?.originCode,row?.fromIata,row?.fromCode,row?.from]
-  :[row?.toAirport?.iata,row?.arrivalAirport?.iata,row?.destination?.iata,row?.arrival?.airport?.iata,row?.arrival?.airportIata,row?.arrivalAirportIata,row?.arrivalAirportCode,row?.arrivalIata,row?.destinationIata,row?.destinationCode,row?.toIata,row?.toCode,row?.to];
+  ?[row?.fromAirport?.iata,row?.fromAirport,row?.departureAirport?.iata,row?.departureAirport,row?.origin?.iata,row?.origin,row?.departure?.airport?.iata,row?.departure?.airportIata,row?.departureAirportIata,row?.departureAirportCode,row?.departureIata,row?.originIata,row?.originCode,row?.fromIata,row?.fromCode,row?.from]
+  :[row?.toAirport?.iata,row?.toAirport,row?.arrivalAirport?.iata,row?.arrivalAirport,row?.destination?.iata,row?.destination,row?.arrival?.airport?.iata,row?.arrival?.airportIata,row?.arrivalAirportIata,row?.arrivalAirportCode,row?.arrivalIata,row?.destinationIata,row?.destinationCode,row?.toIata,row?.toCode,row?.to];
  for(const value of paths){const code=String(value?.iata||value||"").trim().toUpperCase();if(/^[A-Z]{3}$/.test(code))return code;}
  return "";
 }
