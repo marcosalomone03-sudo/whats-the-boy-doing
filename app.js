@@ -54,7 +54,7 @@
     RAK:{name:"Marrakech",tz:"Africa/Casablanca",lat:31.6069,lon:-8.0363}
   };
 
-  const state = { flights:[], candidates:[], selected:null, googleLinks:[], observed:[], scheduleDiagnostics:[] };
+  const state = { flights:[], candidates:[], selected:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
@@ -255,6 +255,10 @@
       for(const item of state.observed)if(String(item.icao||item.hex||"").toLowerCase()===hexes[index])item.dailyTrace={timestamp:result.value.timestamp,trace,source:result.value.source||"FlyItalyADSB"};
     });
     renderObserved(errors.length?"Some FlyItalyADSB checks failed: "+[...new Set(errors)].join(" · "):"");
+  }
+  async function loadNuePool(date) {
+    try { const data=await get("/api/pool?date="+encodeURIComponent(date)); state.pool=data?.aircraft||null; return data; }
+    catch(error){state.pool=null;console.warn("NUE pool unavailable",error);return null;}
   }
   function renderObserved(message) {
     const el=$("observedFlights"); if(!el)return;
@@ -474,13 +478,13 @@
       try {
         const identity=await aircraftIdentity(ac.hex);
         const match=ryanairGroupIdentity(identity);
-        return {...ac,operatorMatch:match.ok,operatorName:match.owner||match.flag||"Unknown",identitySource:identity.source||"Aircraft registry",
+        return {...ac,operatorMatch:match.ok,poolMatch:!!state.pool?.[String(ac.hex).toLowerCase()],operatorName:match.owner||match.flag||"Unknown",identitySource:identity.source||"Aircraft registry",
           r:ac.r||identity.registration||null,t:ac.t||identity.aircraftType||null};
       } catch(error) {
         return {...ac,operatorMatch:false,operatorName:"Unverified",identityError:error.message};
       }
     }));
-    return checked.filter(ac=>ac.operatorMatch).slice(0,3);
+    return checked.filter(ac=>ac.operatorMatch).sort((x,y)=>(y.poolMatch?1:0)-(x.poolMatch?1:0)||y.score-x.score).slice(0,3);
   }
 
   function saveSelected(flight,aircraft) {
@@ -534,8 +538,9 @@
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
+      const poolEvidence=ac.poolMatch?" · IN RECENT NUE AREA POOL":" · NOT IN RECENT NUE AREA POOL";
       const continuity=ac.turnaroundEvidence?" · TURNAROUND CONTINUITY OBSERVED: same HEX at "+esc(ac.turnaroundEvidence.inboundFlight)+" arrival and "+esc(f.flightNumber)+" departure at "+esc(f.origin)+" ("+ac.turnaroundEvidence.gapMinutes+" min between observations)":" · NO VERIFIED TURNAROUND LINK";
-      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · aircraft registry identifies Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}`+continuity;
+      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · aircraft registry identifies Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}`+continuity+poolEvidence;
       const action=historical?"":`<button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button>`;
       return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} · NOT VERIFIED</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · OWNER ${esc(ac.operatorName||"Ryanair Group registry match")} · ${evidence}${historical?" · NOT AIRLINE-CONFIRMED":""}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small>${action}</div>`;
     }).join("");
@@ -610,7 +615,8 @@
       // Collect airport observations before ranking. Same-HEX continuity is supporting evidence only.
       $("connection").textContent="Timetable loaded · checking airport observations and live ADS-B…";
       await loadObserved(date);
-      $("connection").textContent="Timetable loaded · filtering current ADS-B traffic…";
+      const pool=await loadNuePool(date);
+      $("connection").textContent=pool?"Timetable loaded · NUE recent-aircraft pool loaded · filtering live ADS-B…":"Timetable loaded · NUE pool unavailable; using live ADS-B only…";
       const all=[]; const adsbErrors=[];
       const found=await Promise.allSettled(searchFlights.map(f=>findCandidates(f)));
       found.forEach((r,i)=>{ if(r.status==="fulfilled")all.push(...r.value.map(ac=>({flight:searchFlights[i],aircraft:ac}))); else adsbErrors.push(`${searchFlights[i].origin}-${searchFlights[i].destination}: ${r.reason?.message||"ADS-B unavailable"}`); });
@@ -620,7 +626,7 @@
         const key=String(item.aircraft.hex).toLowerCase();
         item.aircraft.turnaroundEvidence=turnaroundEvidence(item.flight,key);
         const old=unique.get(key);
-        const rank=(x)=>(x.aircraft.turnaroundEvidence?100000:0)+x.aircraft.score;
+        const rank=(x)=>(x.aircraft.turnaroundEvidence?100000:0)+(x.aircraft.poolMatch?5000:0)+x.aircraft.score;
         if(!old||rank(item)>rank(old))unique.set(key,item);
       }
       const final=[...unique.values()].sort((a,b)=>(b.aircraft.turnaroundEvidence?1:0)-(a.aircraft.turnaroundEvidence?1:0)||b.aircraft.score-a.aircraft.score).slice(0,6);
