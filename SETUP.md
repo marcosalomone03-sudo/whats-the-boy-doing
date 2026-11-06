@@ -36,3 +36,15 @@ Keep your existing `icon-192.png` and `icon-512.png`, or use the included versio
 
 ## Important
 This version is a beta. Ryanair's timetable endpoint is unofficial and can change. ADS-B coverage is incomplete. Route matching is probabilistic and therefore asks for manual confirmation. Do not treat it as an operational source or as proof of exact takeoff/landing or delay.
+
+
+## Part E — optional worldwide airport-board fallback
+
+The app already uses Aena's public board for supported Spanish airports without a key. For airports outside that coverage (for example PMO, BUD and STN), you can enable the optional SkyLink airport-board source:
+
+1. Apply for the **FREE Trial** at https://skylinkapi.com/pricing/. The published allowance is 1,000 requests/month for personal, non-commercial projects; applications are reviewed and access is not automatic.
+2. After approval, open Cloudflare Dashboard → **Workers & Pages** → **wtbd-flight-proxy** → **Settings** → **Variables and Secrets**.
+3. Add a **Secret** named `SKYLINK_API_KEY` and paste the key as its value.
+4. Save and deploy the Worker.
+
+The key stays in Cloudflare and is never placed in the iPhone app or GitHub source. Without this secret, unsupported airports continue to use the public Ryanair timetable and may have gaps.
