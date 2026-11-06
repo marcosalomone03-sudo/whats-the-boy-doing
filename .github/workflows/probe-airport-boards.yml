@@ -1,4 +1,4 @@
-name: Probe NUE board and Google search results
+name: Probe NUE board and Google fallback variants
 
 on:
   push:
@@ -13,22 +13,23 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe exact public requests
+      - name: Test airport filter and Google HTML variants
         run: |
           node --input-type=module <<'NODE'
           const h={"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36","Accept":"application/json,text/html,*/*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"};
           const base="https://airportnue-service.justrelate.io/production/api/flight-status";
-          const qs=[
-            "lang=en&date=20261106",
-            "lang=en&airportIata=&date=20261106&hourMin=&hourMax=",
-            "lang=en&date=20261106&hourMin=&hourMax=",
-            "lang=en&airportIata=NUE&date=20261106",
-            "lang=en&airportIata=NUE&flightNumber=&date=20261106&hourMin=00&hourMax=24"
-          ];
-          for(const dir of ["departures","arrivals"])for(const q of qs){const r=await fetch(base+"/"+dir+"?"+q,{headers:h});const t=await r.text();console.log("NUE",dir,q,"HTTP",r.status,"BODY",t.slice(0,1400));}
+          for(const dir of ["departures","arrivals"])for(const airport of ["ALC","PMO","BUD",""]){
+            const q="lang=en&"+(airport?"airportIata="+airport+"&":"")+"date=20261106&hourMin=&hourMax=";
+            const r=await fetch(base+"/"+dir+"?"+q,{headers:h});const rows=await r.json();
+            console.log("BOARD",dir,"filter",airport||"none","count",rows.length);
+            for(const x of rows.filter(x=>x.flight?.airline?.iata==="FR"||x.flight?.airline?.iata==="RK").slice(0,10))
+              console.log("RYANAIR",dir,x.flight.airline.iata+x.flight.number,"other",dir==="departures"?x.toAirport?.iata:x.fromAirport?.iata,"scheduled",x.scheduledTime,"localDate",x.scheduledLocalDate);
+          }
           const q="Ryanair flight NUE ALC 6 November 2026 flight number schedule";
-          const gr=await fetch("https://www.google.com/search?q="+encodeURIComponent(q)+"&num=10&hl=en&gl=de",{headers:{"User-Agent":h["User-Agent"],"Accept":"text/html"}});
-          const gt=await gr.text();
-          console.log("GOOGLE",gr.status,gt.length);
-          for(const term of ["FR904","FR","Ryanair","NUE","ALC","<div id=\"search\""]){const p=gt.indexOf(term);console.log("GOOGLE TERM",term,p,p>=0?gt.slice(Math.max(0,p-350),p+900):"");}
+          for(const suffix of ["&gbv=1","&udm=14","&gbv=1&num=10","&udm=14&num=10"]){
+            const url="https://www.google.com/search?q="+encodeURIComponent(q)+"&hl=en&gl=de"+suffix;
+            const r=await fetch(url,{headers:{"User-Agent":h["User-Agent"],"Accept":"text/html"}});const html=await r.text();
+            console.log("GOOGLE",suffix,r.status,html.length,"resultmarkers",html.includes("id=\"search\""),"Ryanair",html.toLowerCase().includes("ryanair"),"FR",html.match(/FR\\s?\\d{2,5}/g)?.slice(0,10)||[]);
+            const p=html.toLowerCase().indexOf("ryanair");console.log("SNIPPET",p,p>=0?html.slice(Math.max(0,p-300),p+700):html.slice(-500));
+          }
           NODE
