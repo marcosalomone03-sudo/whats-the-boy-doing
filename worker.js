@@ -8,6 +8,34 @@
  *   /api/hex?icao=4CA123
  */
 const MONTHS={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+async function flightNerveFlights(origin,destination,date,key){
+ if(!key||!date)return [];
+ const routeUrl="https://api.flightnerve.com/route/"+encodeURIComponent(key)+"?from="+encodeURIComponent(origin)+"&to="+encodeURIComponent(destination);
+ const routeResponse=await fetch(routeUrl,{headers:{"Accept":"application/json"},cf:{cacheTtl:86400,cacheEverything:true}});
+ if(!routeResponse.ok)return [];
+ let route;try{route=await routeResponse.json();}catch{return [];}
+ const candidates=[...new Set((Array.isArray(route.flights)?route.flights:[])
+  .filter(item=>String(item.airline||"").toUpperCase()==="FR")
+  .map(item=>String(item.flight||"").toUpperCase().replace(/\\s/g,""))
+  .filter(number=>/^FR\\d+$/.test(number)))].slice(0,8);
+ const dateKey=date.replace(/-/g,"");
+ const results=await Promise.allSettled(candidates.map(async flight=>{
+  const number=flight.slice(2);
+  const url="https://api.flightnerve.com/airline/"+encodeURIComponent(key)+"?num="+encodeURIComponent(number)+"&name=FR&date="+dateKey+"&depap="+encodeURIComponent(origin);
+  const response=await fetch(url,{headers:{"Accept":"application/json"},cf:{cacheTtl:300,cacheEverything:true}});
+  if(!response.ok)return null;
+  const payload=await response.json();
+  const legs=Array.isArray(payload)&&Array.isArray(payload[0])?payload.flat():Array.isArray(payload)?payload:[];
+  const departure=legs.find(item=>item&&item.departure)?.departure;
+  const arrival=legs.find(item=>item&&item.arrival)?.arrival;
+  if(!departure||!arrival)return null;
+  if(String(departure.airportCode||"").toUpperCase()!==origin||String(arrival.airportCode||"").toUpperCase()!==destination)return null;
+  const dep=departure.departureDateTime,arr=arrival.arrivalDateTime;
+  if(!dep||!arr||String(dep).slice(0,10)!==date)return null;
+  return {flightNumber:flight,carrierCode:"FR",departureDateTime:dep,arrivalDateTime:arr};
+ }));
+ return results.filter(item=>item.status==="fulfilled"&&item.value).map(item=>item.value);
+}
 function cors(body,status=200,headers={}) {
  const responseHeaders=new Headers(headers);
  responseHeaders.set("Access-Control-Allow-Origin","*");
@@ -48,7 +76,7 @@ async function enrichRyanairSchedule(data,origin,destination,year,month){
  data.days.sort((a,b)=>Number(a.day)-Number(b.day));return data;
 }
 export default {
- async fetch(request) {
+ async fetch(request, env) {
   if (request.method === "OPTIONS") return cors(null,204);
   const u = new URL(request.url);
   try {
@@ -57,7 +85,8 @@ export default {
     const o=(u.searchParams.get("origin")||"").toUpperCase();
     const d=(u.searchParams.get("destination")||"").toUpperCase();
     const y=Number(u.searchParams.get("year")), m=Number(u.searchParams.get("month"));
-    if(!/^[A-Z]{3}$/.test(o)||!/^[A-Z]{3}$/.test(d)||y<2024||y>2035||m<1||m>12) return cors(JSON.stringify({error:"Invalid schedule parameters"}),400,{"Content-Type":"application/json"});
+    const selectedDate=u.searchParams.get("date")||"";
+    if(!/^[A-Z]{3}$/.test(o)||!/^[A-Z]{3}$/.test(d)||y<2024||y>2035||m<1||m>12||(selectedDate&&!/^\\d{4}-\\d{2}-\\d{2}$/.test(selectedDate))) return cors(JSON.stringify({error:"Invalid schedule parameters"}),400,{"Content-Type":"application/json"});
     target=`https://services-api.ryanair.com/timtbl/3/schedules/${o}/${d}/years/${y}/months/${m}`;
    } else if (u.pathname === "/api/aircraft") {
     const lat=Number(u.searchParams.get("lat")), lon=Number(u.searchParams.get("lon")), dist=Number(u.searchParams.get("dist")||35);
@@ -77,13 +106,22 @@ export default {
     const d=(u.searchParams.get("destination")||"").toUpperCase();
     const y=Number(u.searchParams.get("year")),m=Number(u.searchParams.get("month"));
     let source="Ryanair timetable";
-    try {
-     schedule=await enrichRyanairSchedule(schedule,o,d,y,m);
-     source="Ryanair timetable + Flight.info best-effort";
-    } catch (fallbackError) {
-     // The optional secondary source must never take down the primary timetable.
-     source="Ryanair timetable (fallback unavailable)";
-    }
+    if(env&&env.FLIGHTNERVE_API_KEY&&selectedDate){
+     try{
+      const extra=await flightNerveFlights(o,d,selectedDate,env.FLIGHTNERVE_API_KEY);
+      if(extra.length){
+       let day=schedule.days.find(item=>Number(item.day)===Number(selectedDate.slice(-2)));
+       if(!day){day={day:Number(selectedDate.slice(-2)),flights:[]};schedule.days.push(day);}
+       for(const flight of extra){
+        const exists=day.flights.some(item=>String(item.flightNumber||item.number||"").replace(/\\s/g,"").toUpperCase()===flight.flightNumber);
+        if(!exists)day.flights.push(flight);
+       }
+       schedule.days.sort((a,b)=>Number(a.day)-Number(b.day));
+       source="Ryanair timetable + FlightNerve";
+      }else source="Ryanair timetable (FlightNerve found no additional FR flights)";
+     }catch(error){source="Ryanair timetable (FlightNerve unavailable)";}
+    }else if(!selectedDate)source="Ryanair timetable (date-specific fallback not requested)";
+    else source="Ryanair timetable (FlightNerve key not configured)";
     return cors(JSON.stringify(schedule),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source});
    }
    return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json"});
