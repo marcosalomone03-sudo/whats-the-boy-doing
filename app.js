@@ -284,11 +284,16 @@
     const operatorMatch = /ryanair|malta air|buzz|lauda|ryanair sun|ryanair uk/.test(operator);
     if (isKnownAirbus(type)) return {ok:false, callMatch, groupCall, operatorMatch, typeMatch:false, reason:"Airbus excluded"};
     const typeMatch = RYANAIR_737_TYPES.has(type);
+    // A broadcast Ryanair-group callsign for a DIFFERENT flight is negative evidence.
+    // Never let a generic group prefix (e.g. RYR) make another flight look like this one.
+    if (groupCall && !callMatch) {
+      return {ok:false, callMatch:false, groupCall:true, operatorMatch, typeMatch, reason:"Different Ryanair flight number"};
+    }
     // If the feed explicitly identifies a different operator, never treat it as a Ryanair candidate.
     if (operatorKnown && !operatorMatch) return {ok:false, callMatch, groupCall, operatorMatch:false, typeMatch, reason:"Different operator"};
-    // A Ryanair-group callsign or operator is the strongest evidence. If neither is
-    // broadcast, a 737 is only provisionally eligible and must pass strict route/time scoring.
-    if (!callMatch && !groupCall && !operatorMatch && !typeMatch) {
+    // Exact flight callsign is strongest. If ADS-B omits callsign, a 737/operator candidate
+    // remains provisional and must pass the strict route, direction and timing checks below.
+    if (!callMatch && !operatorMatch && !typeMatch) {
       return {ok:false, callMatch, groupCall, operatorMatch, typeMatch, reason:"No compatible aircraft evidence"};
     }
     return {ok:true, callMatch, groupCall, operatorMatch, typeMatch, operatorKnown};
