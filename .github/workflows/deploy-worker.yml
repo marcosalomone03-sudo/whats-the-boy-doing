@@ -62,6 +62,14 @@ jobs:
           if (!nov6Flights.includes("FR904")) console.warn("WARN FR904 on 2026-11-06 is still absent; timetable gap remains unresolved");
           else console.log("PASS FR904 recovered for 2026-11-06");
 
+          const aena = await request("/api/schedule?origin=STN&destination=ALC&year=2026&month=11&date=2026-11-06");
+          const aenaDay = aena.data.days.find(day => Number(day.day) === 6);
+          const aenaFlights = (aenaDay?.flights || []).map(f => String(f.flightNumber || f.number || "").replace(/\s/g, "").toUpperCase());
+          console.log("INFO Aena STN-ALC 2026-11-06:", aenaFlights.join(", ") || "no Ryanair rows returned",
+            "source:", aena.response.headers.get("X-WTBD-Schedule-Sources") || "header missing");
+          if (aenaFlights.includes("FR2586")) console.log("PASS Aena board recovered FR2586");
+          else console.warn("WARN Aena board smoke test did not return FR2586; check upstream availability");
+
           const aircraft = await request("/api/aircraft?lat=51.4700&lon=-0.4543&dist=35");
           if (!aircraft.data || !Array.isArray(aircraft.data.ac)) {
             throw new Error("Aircraft endpoint did not return the expected ac[] structure");
