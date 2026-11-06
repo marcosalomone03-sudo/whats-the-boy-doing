@@ -382,7 +382,9 @@
   function renderAircraft(flight,ac) {
     const onGround=ac.alt_baro==="ground";
     const altitude=numeric(ac.alt_baro), speed=numeric(ac.gs), lat=numeric(ac.lat), lon=numeric(ac.lon);
-    const status=onGround?"ON GROUND":altitude!==null?"AIRBORNE":"UNKNOWN";
+    // ADS-B marks both parked and taxiing aircraft as "ground"; use groundspeed to distinguish movement.
+    const taxiing=onGround && speed!==null && speed>=5;
+    const status=onGround?(taxiing?"TAXIING":"ON GROUND"):altitude!==null?"AIRBORNE":"UNKNOWN";
     const statusClass=onGround?"ground":status==="AIRBORNE"?"air":"none";
     return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><span class="status ${statusClass}">${status}</span></div>
       <div class="stats">
