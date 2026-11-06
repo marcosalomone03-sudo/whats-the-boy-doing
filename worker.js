@@ -1,156 +1,117 @@
 /**
  * What's the boy doing? — free API bridge
- * Official Aena airport boards are queried directly; SkyLink is an optional
- * worldwide airport-board fallback configured with SKYLINK_API_KEY.
- * Routes:
- * Deployment pipeline: GitHub Actions publishes this Worker to Cloudflare.
- *   /api/schedule?origin=NUE&destination=BUD&year=2026&month=11
- *   /api/aircraft?lat=49.4987&lon=11.078&dist=35
- *   /api/hex?icao=4CA123
+ * Schedule priority: Nuremberg Airport public board, then Google Search fallback.
+ * ADS-B.lol is used only after a scheduled flight has been identified.
  */
-const MONTHS={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
-const AENA_AIRPORTS = new Set(["ALC","AGP","PMI","BCN","MAD","SVQ","TFS","LPA","VLC","BIO","IBZ","MAH","SCQ","GRX","ACE","FUE","TFN","ZAZ","SDR","VLL","REU","OVD","LCG","MJV","XRY","GRO","SPC"]);
-function dateLabel(date) {
- const [y,m,d]=date.split("-");
- return d+"/"+m+"/"+y;
+function dateCompact(date){return date.replace(/-/g,"");}
+function daySchedule(date,flights){return {days:[{day:Number(date.slice(-2)),flights}]};}
+function pick(obj,keys){for(const k of keys){const v=obj?.[k];if(v!==undefined&&v!==null&&String(v).trim()!=="")return v;}return "";}
+function time24(value){
+ const s=String(value||"").trim();
+ let m=s.match(/(?:^|\\D)([01]?\\d|2[0-3]):([0-5]\\d)(?:\\s*([ap]\\.?m\\.?))?/i);
+ if(!m)return "";
+ let h=Number(m[1]),mi=m[2],ampm=(m[3]||"").toLowerCase().replace(/\\./g,"");
+ if(ampm==="pm"&&h<12)h+=12;
+ if(ampm==="am"&&h===12)h=0;
+ return String(h).padStart(2,"0")+":"+mi;
 }
-function skyDate(label,fallback) {
- const match=String(label||"").match(/(\d{1,2})\s+([A-Za-z]{3})/);
- if(!match||!MONTHS[match[2]])return fallback;
- let year=Number(fallback.slice(0,4));
- const month=MONTHS[match[2]],day=Number(match[1]);
- const base=new Date(fallback+"T12:00:00Z").getTime();
- let candidate=Date.UTC(year,month-1,day,12);
- if(candidate-base>180*86400000)year--;
- else if(base-candidate>180*86400000)year++;
- return year+"-"+String(month).padStart(2,"0")+"-"+String(day).padStart(2,"0");
-}
-async function aenaFlights(origin,destination,date) {
- let boardAirport="",flightType="",otherAirport="";
- if(AENA_AIRPORTS.has(origin)){boardAirport=origin;flightType="S";otherAirport=destination;}
- else if(AENA_AIRPORTS.has(destination)){boardAirport=destination;flightType="L";otherAirport=origin;}
- else return [];
- const daysAhead=(Date.parse(date+"T12:00:00Z")-Date.now())/86400000;
- const range=daysAhead>=-1&&daysAhead<=2?"&limit=200&dosDias=si":"";
- const url="https://www.aena.es/sites/Satellite?pagename=AENA_ConsultarVuelos&airport="+encodeURIComponent(boardAirport)+"&flightType="+flightType+range;
- const response=await fetch(url,{method:"POST",headers:{"Accept":"application/json","Origin":"https://www.aena.es","Referer":"https://www.aena.es/en/flight-info.html?iata="+boardAirport},cf:{cacheTtl:300,cacheEverything:true}});
- if(!response.ok)return [];
- let rows;try{rows=await response.json();}catch{return [];}
- if(!Array.isArray(rows))return [];
- return rows.filter(row=>{
-  const carrier=String(row.iataCompania||"").toUpperCase();
-  return row.iataAena===boardAirport&&row.iataOtro===otherAirport&&row.fecha===dateLabel(date)&&["FR","RK"].includes(carrier);
- }).map(row=>{
-  const carrier=String(row.iataCompania||"FR").toUpperCase();
-  const number=String(row.numVuelo||"").replace(/\s/g,"");
-  const boardTime=String(row.horaProgramada||row.horaEstimada||"").slice(0,5);
-  if(!/^\d{2}:\d{2}$/.test(boardTime)||!number)return null;
-  return {flightNumber:carrier+number,carrierCode:carrier,boardTime,boardType:flightType==="S"?"departure":"arrival",boardDate:date,source:"Aena"};
+function normalizeBoardRows(payload,origin,destination,date,direction){
+ let rows=Array.isArray(payload)?payload:[];
+ if(!rows.length){
+  for(const key of ["flights","items","results","data","departures","arrivals"])if(Array.isArray(payload?.[key])){rows=payload[key];break;}
+ }
+ const expectedOther=origin==="NUE"?destination:origin;
+ return rows.map(row=>{
+  const numberRaw=String(pick(row,["flightNumber","flightNo","flight","number","iataFlightNumber","flight_number"])).replace(/\\s/g,"").toUpperCase();
+  const carrier=String(pick(row,["airlineIata","carrierCode","iataAirline","airlineCode","carrier"])||numberRaw.match(/^[A-Z]{2,3}/)?.[0]||"").toUpperCase();
+  const number=/^[A-Z]{2,3}\\d/.test(numberRaw)?numberRaw:carrier+numberRaw;
+  const other=String(pick(row,origin==="NUE"?["destinationIata","destination","airportIata","iataOther","to"]:["originIata","origin","airportIata","iataOther","from"])).toUpperCase();
+  if(!/^((FR|RK)\\d{1,5})$/.test(number))return null;
+  if(other&&other!==expectedOther)return null;
+  const boardTime=time24(pick(row,["scheduledTime","scheduled","scheduledAt","scheduled_time","time","departureTime","arrivalTime","estimatedTime","estimated"]));
+  if(!boardTime)return null;
+  return {flightNumber:number,carrierCode:carrier||number.slice(0,2),boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,source:"Nuremberg Airport"};
  }).filter(Boolean);
 }
-async function skyLinkFlights(origin,destination,date,key) {
- if(!key||!(origin==="NUE"||destination==="NUE"))return [];
+async function nurembergFlights(origin,destination,date){
+ if(origin!=="NUE"&&destination!=="NUE")return [];
  const direction=origin==="NUE"?"departures":"arrivals";
- const other=origin==="NUE"?destination:origin;
- const dateKey=date.split("-").reverse().join("-");
- const base="https://data.skylinkapi.com/v3";
- const boardUrl=base+"/schedules/"+direction+"?iata=NUE&date="+encodeURIComponent(dateKey);
- const boardResponse=await fetch(boardUrl,{headers:{"Accept":"application/json","x-api-key":key},cf:{cacheTtl:180,cacheEverything:true}});
- if(!boardResponse.ok)return [];
- let board;try{board=await boardResponse.json();}catch{return [];}
- const rows=Array.isArray(board?.flights)?board.flights:[];
- const unique=new Map();
- for(const row of rows){
-  const flight=String(row.Flight||"").replace(/\s/g,"").toUpperCase();
-  if(row.IATA!==other||!/^FR\d+$|^RK\d+$/.test(flight))continue;
-  if(skyDate(row.Date,date)!==date)continue;
-  unique.set(flight,row);
+ const base="https://airportnue-service.justrelate.io/production/api/flight-status/"+direction;
+ const headers={"Accept":"application/json, text/plain, */*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status","User-Agent":"Mozilla/5.0"};
+ const dateFormats=[dateCompact(date),date];
+ for(const dateValue of dateFormats){
+  const url=base+"?lang=en&airportIata=NUE&flightNumber=&date="+encodeURIComponent(dateValue)+"&hourMin=&hourMax=";
+  const response=await fetch(url,{headers,cf:{cacheTtl:60,cacheEverything:true}});
+  if(!response.ok)continue;
+  let payload;try{payload=await response.json();}catch{continue;}
+  const rows=normalizeBoardRows(payload,origin,destination,date,direction);
+  if(rows.length)return rows;
  }
- const results=await Promise.allSettled([...unique.entries()].slice(0,10).map(async([flight,row])=>{
-  const response=await fetch(base+"/flight_status/"+encodeURIComponent(flight),{headers:{"Accept":"application/json","x-api-key":key},cf:{cacheTtl:120,cacheEverything:true}});
-  if(response.ok){
-   const status=await response.json();
-   const dep=status.departure||{},arr=status.arrival||{};
-   const depTime=String(dep.scheduled_time||"").slice(0,5),arrTime=String(arr.scheduled_time||"").slice(0,5);
-   if(/^\d{2}:\d{2}$/.test(depTime)&&/^\d{2}:\d{2}$/.test(arrTime)){
-    return {flightNumber:flight,carrierCode:flight.startsWith("RK")?"RK":"FR",departureDateTime:skyDate(dep.scheduled_date,date)+"T"+depTime,arrivalDateTime:skyDate(arr.scheduled_date,date)+"T"+arrTime,source:"SkyLink"};
-   }
-  }
-  const time=String(row.Time||"").slice(0,5);
-  if(!/^\d{2}:\d{2}$/.test(time))return null;
-  return {flightNumber:flight,carrierCode:flight.startsWith("RK")?"RK":"FR",boardTime:time,boardType:direction==="departures"?"departure":"arrival",boardDate:date,source:"SkyLink"};
- }));
- return results.filter(x=>x.status==="fulfilled"&&x.value).map(x=>x.value);
+ return [];
 }
-function cors(body,status=200,headers={}) {
- const responseHeaders=new Headers(headers);
- responseHeaders.set("Access-Control-Allow-Origin","*");
- responseHeaders.set("Access-Control-Allow-Methods","GET, OPTIONS");
- responseHeaders.set("Access-Control-Allow-Headers","Content-Type, Accept");
- return new Response(status===204?null:body,{status,headers:responseHeaders});
+function stripHtml(html){
+ return html.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+  .replace(/<[^>]+>/g," ").replace(/&nbsp;|&#160;/gi," ").replace(/&amp;/gi,"&")
+  .replace(/&#39;|&apos;/gi,"'").replace(/&quot;/gi,'"').replace(/&lt;/gi,"<").replace(/&gt;/gi,">")
+  .replace(/\\s+/g," ").trim();
+}
+async function googleFlights(origin,destination,date){
+ if(origin!=="NUE"&&destination!=="NUE")return [];
+ const direction=origin==="NUE"?"departure":"arrival";
+ const route=origin+" "+destination;
+ const query="Ryanair flight "+route+" "+date+" flight number schedule";
+ const url="https://www.google.com/search?q="+encodeURIComponent(query)+"&num=10&hl=en&gl=de";
+ const response=await fetch(url,{headers:{"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36","Accept":"text/html"},cf:{cacheTtl:300,cacheEverything:true}});
+ if(!response.ok)return [];
+ const html=await response.text();
+ if(html.length<3000||/unusual traffic|sorry\\/index|consent\\.google/i.test(html))return [];
+ const text=stripHtml(html);
+ const matches=[...text.matchAll(/\\b(?:FR|RK)\\s?\\d{1,5}\\b/gi)];
+ const results=[];
+ for(const match of matches){
+  const start=Math.max(0,match.index-220),end=Math.min(text.length,match.index+260);
+  const context=text.slice(start,end);
+  if(!/ryanair/i.test(context))continue;
+  const number=match[0].replace(/\\s/g,"").toUpperCase();
+  const times=[...context.matchAll(/\\b(?:[01]?\\d|2[0-3]):[0-5]\\d\\b/g)].map(m=>time24(m[0]));
+  const boardTime=times.find(Boolean);
+  if(!boardTime)continue;
+  results.push({flightNumber:number,carrierCode:number.startsWith("RK")?"RK":"FR",boardTime,boardType:direction,boardDate:date,source:"Google Search (unverified)"});
+ }
+ return [...new Map(results.map(row=>[row.flightNumber,row])).values()];
+}
+function cors(body,status=200,headers={}){
+ const h=new Headers(headers);h.set("Access-Control-Allow-Origin","*");h.set("Access-Control-Allow-Methods","GET, OPTIONS");h.set("Access-Control-Allow-Headers","Content-Type, Accept");
+ return new Response(status===204?null:body,{status,headers:h});
 }
 export default {
- async fetch(request, env) {
-  if (request.method === "OPTIONS") return cors(null,204);
-  const u = new URL(request.url);
-  try {
-   let target, selectedDate="";
-   if (u.pathname === "/api/schedule") {
-    const o=(u.searchParams.get("origin")||"").toUpperCase();
-    const d=(u.searchParams.get("destination")||"").toUpperCase();
-    const y=Number(u.searchParams.get("year")), m=Number(u.searchParams.get("month"));
-    selectedDate=u.searchParams.get("date")||"";
-    if(!/^[A-Z]{3}$/.test(o)||!/^[A-Z]{3}$/.test(d)||y<2024||y>2035||m<1||m>12||(selectedDate&&!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate))) return cors(JSON.stringify({error:"Invalid schedule parameters"}),400,{"Content-Type":"application/json"});
-    target=`https://services-api.ryanair.com/timtbl/3/schedules/${o}/${d}/years/${y}/months/${m}`;
-   } else if (u.pathname === "/api/aircraft") {
-    const lat=Number(u.searchParams.get("lat")), lon=Number(u.searchParams.get("lon")), dist=Number(u.searchParams.get("dist")||35);
-    if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||dist<1||dist>250) return cors(JSON.stringify({error:"Invalid ADS-B search parameters"}),400,{"Content-Type":"application/json"});
-    target=`https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`;
-   } else if (u.pathname === "/api/hex") {
-    const hex=(u.searchParams.get("icao")||"").toLowerCase();
-    if(!/^[0-9a-f]{6}$/.test(hex)) return cors(JSON.stringify({error:"Invalid ICAO hex"}),400,{"Content-Type":"application/json"});
-    target=`https://api.adsb.lol/v2/hex/${hex}`;
-   } else return cors(JSON.stringify({error:"Unknown endpoint"}),404,{"Content-Type":"application/json"});
-   const upstream=await fetch(target,{headers:{"Accept":"application/json"},cf:{cacheTtl:10,cacheEverything:true}});
-   const body=await upstream.text();
+ async fetch(request,env){
+  if(request.method==="OPTIONS")return cors(null,204);
+  const u=new URL(request.url);
+  try{
    if(u.pathname==="/api/schedule"){
-    if(!upstream.ok)return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json"});
-    let schedule;try{schedule=JSON.parse(body);}catch{return cors(JSON.stringify({error:"Invalid timetable response"}),502,{"Content-Type":"application/json"});}
-    const o=(u.searchParams.get("origin")||"").toUpperCase();
-    const d=(u.searchParams.get("destination")||"").toUpperCase();
-    const y=Number(u.searchParams.get("year")),m=Number(u.searchParams.get("month"));
-    let source="Ryanair timetable";
-    if(selectedDate){
-     const merge=extra=>{
-      if(!extra.length)return 0;
-      let day=schedule.days.find(item=>Number(item.day)===Number(selectedDate.slice(-2)));
-      if(!day){day={day:Number(selectedDate.slice(-2)),flights:[]};schedule.days.push(day);}
-      let added=0;
-      for(const flight of extra){
-       const exists=day.flights.some(item=>String(item.flightNumber||item.number||"").replace(/\s/g,"").toUpperCase()===flight.flightNumber);
-       if(!exists){day.flights.push(flight);added++;}
-      }
-      schedule.days.sort((a,b)=>Number(a.day)-Number(b.day));
-      return added;
-     };
-     try{
-      const official=await aenaFlights(o,d,selectedDate);
-      const added=merge(official);
-      if(official.length)source=added?"Ryanair timetable + Aena official board":"Ryanair timetable + Aena (already listed)";
-     }catch(error){source="Ryanair timetable (Aena board unavailable)";}
-     if(env&&env.SKYLINK_API_KEY){
-      try{
-       const extra=await skyLinkFlights(o,d,selectedDate,env.SKYLINK_API_KEY);
-       const added=merge(extra);
-       if(extra.length)source+=(source.includes("Aena")?" + SkyLink":" + SkyLink airport board")+(added?"":" (no new rows)");
-      }catch(error){source+=" (SkyLink board unavailable)";}
-     }else if(!source.includes("Aena"))source+=" (SkyLink key not configured)";
-    }else source="Ryanair timetable (date-specific board lookup not requested)";
-    return cors(JSON.stringify(schedule),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
+    const origin=(u.searchParams.get("origin")||"").toUpperCase(),destination=(u.searchParams.get("destination")||"").toUpperCase(),date=u.searchParams.get("date")||"";
+    if(!/^[A-Z]{3}$/.test(origin)||!/^[A-Z]{3}$/.test(destination)||!(origin==="NUE"||destination==="NUE")||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid schedule parameters; every tracked route must touch NUE and include a date."}),400,{"Content-Type":"application/json"});
+    let flights=[],source="Nuremberg Airport";
+    try{flights=await nurembergFlights(origin,destination,date);}catch(error){source="Nuremberg Airport unavailable";}
+    if(!flights.length){
+     source+="; Google Search fallback";
+     try{flights=await googleFlights(origin,destination,date);}catch(error){source+=" unavailable";}
+    }
+    return cors(JSON.stringify(daySchedule(date,flights)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
    }
-   return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json"});
-  } catch(e) {
-   return cors(JSON.stringify({error:"Upstream request failed",detail:String(e)}),502,{"Content-Type":"application/json"});
-  }
+   let target;
+   if(u.pathname==="/api/aircraft"){
+    const lat=Number(u.searchParams.get("lat")),lon=Number(u.searchParams.get("lon")),dist=Number(u.searchParams.get("dist")||35);
+    if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||dist<1||dist>250)return cors(JSON.stringify({error:"Invalid ADS-B search parameters"}),400,{"Content-Type":"application/json"});
+    target="https://api.adsb.lol/v2/lat/"+lat+"/lon/"+lon+"/dist/"+dist;
+   }else if(u.pathname==="/api/hex"){
+    const hex=(u.searchParams.get("icao")||"").toLowerCase();
+    if(!/^[0-9a-f]{6}$/.test(hex))return cors(JSON.stringify({error:"Invalid ICAO hex"}),400,{"Content-Type":"application/json"});
+    target="https://api.adsb.lol/v2/hex/"+hex;
+   }else return cors(JSON.stringify({error:"Unknown endpoint"}),404,{"Content-Type":"application/json"});
+   const upstream=await fetch(target,{headers:{"Accept":"application/json"},cf:{cacheTtl:10,cacheEverything:true}});
+   return cors(await upstream.text(),upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json"});
+  }catch(error){return cors(JSON.stringify({error:"Upstream request failed",detail:String(error)}),502,{"Content-Type":"application/json"});}
  }
 };
