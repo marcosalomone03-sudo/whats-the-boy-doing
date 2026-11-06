@@ -1,8 +1,9 @@
-const CACHE_NAME = "wtbd-v8-shell";
+const CACHE_NAME = "wtbd-v9-shell";
 const SHELL_FILES = [
   "./",
   "./index.html",
   "./app.js",
+  "./airports.json",
   "./config.js",
   "./manifest.webmanifest",
   "./icon-192.png",
