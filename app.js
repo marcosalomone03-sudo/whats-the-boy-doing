@@ -572,8 +572,9 @@
         return;
       }
       const nowMs=Date.now();
-      // Only flights that have not arrived long ago, or are due to depart within the next 3 hours.
-      const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-180*60000&&nowMs<=f.arrival.getTime()+30*60000);
+      // Track from 3 hours before scheduled departure until 3 hours after scheduled arrival,
+      // allowing delayed flights to remain eligible for live ADS-B matching.
+      const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-180*60000&&nowMs<=f.arrival.getTime()+180*60000);
       if (!searchFlights.length) {
         renderCandidates([],"No flight is inside the live tracking window. No future observations were requested.");
         $("connection").textContent="Timetable loaded · no flight inside live window";
