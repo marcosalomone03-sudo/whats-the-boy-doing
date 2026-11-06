@@ -120,6 +120,33 @@ export default {
     return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"public, max-age=60","X-WTBD-Observed-Source":"FlyItalyADSB"});
    }
    let target,hex="";
+   if(u.pathname==="/api/identity"){
+    const icao=(u.searchParams.get("icao")||"").toLowerCase();
+    if(!/^[0-9a-f]{6}$/.test(icao))return cors(JSON.stringify({error:"Invalid ICAO hex"}),400,{"Content-Type":"application/json"});
+    // ADS-B position feeds do not provide reliable airline ownership. Enrich the
+    // ICAO address from an aircraft registry; cache the public registry result for one day.
+    try{
+     const response=await fetch("https://hexdb.io/api/v2/aircraft/"+icao,{headers:{"Accept":"application/json"},cf:{cacheTtl:86400,cacheEverything:true}});
+     if(response.ok){
+      const data=await response.json();
+      return cors(JSON.stringify({hex:data.hex||icao,registration:data.registration||"",
+       aircraftType:data.icao_type_code||"",registeredOwner:data.registered_owner||"",
+       operatorFlagCode:data.operator_flag_code||"",source:"HexDB"}),200,
+       {"Content-Type":"application/json","Cache-Control":"public, max-age=86400"});
+     }
+    }catch(error){}
+    try{
+     const response=await fetch("https://api.adsbdb.com/v0/aircraft/"+icao,{headers:{"Accept":"application/json"},cf:{cacheTtl:86400,cacheEverything:true}});
+     if(response.ok){
+      const data=await response.json(),a=data?.response?.aircraft||{};
+      return cors(JSON.stringify({hex:icao,registration:a.registration||"",aircraftType:a.icao_type||"",
+       registeredOwner:a.registered_owner||"",operatorFlagCode:a.operator_flag_code||"",source:"ADSBDB"}),200,
+       {"Content-Type":"application/json","Cache-Control":"public, max-age=86400"});
+     }
+    }catch(error){}
+    return cors(JSON.stringify({error:"Aircraft registry identity unavailable",icao}),404,
+     {"Content-Type":"application/json","Cache-Control":"public, max-age=3600"});
+   }
    if(u.pathname==="/api/aircraft"){
     const lat=Number(u.searchParams.get("lat")),lon=Number(u.searchParams.get("lon")),dist=Number(u.searchParams.get("dist")||35);
     if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||dist<1||dist>250)return cors(JSON.stringify({error:"Invalid ADS-B search parameters"}),400,{"Content-Type":"application/json"});
