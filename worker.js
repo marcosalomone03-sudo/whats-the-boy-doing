@@ -4,7 +4,7 @@
  * ADS-B.lol is used only after a scheduled flight has been identified.
  */
 function dateCompact(date){return date.replace(/-/g,"");}
-function daySchedule(date,flights){return {days:[{day:Number(date.slice(-2)),flights}]};}
+function daySchedule(date,flights,source){return {source,days:[{day:Number(date.slice(-2)),flights}]};}
 function pick(obj,keys){for(const k of keys){const v=obj?.[k];if(v!==undefined&&v!==null&&String(v).trim()!=="")return v;}return "";}
 function time24(value){
  const s=String(value||"").trim();
@@ -98,7 +98,7 @@ export default {
      source+="; Google Search fallback";
      try{flights=await googleFlights(origin,destination,date);}catch(error){source+=" unavailable";}
     }
-    return cors(JSON.stringify(daySchedule(date,flights)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
+    return cors(JSON.stringify(daySchedule(date,flights,source)),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,"Access-Control-Expose-Headers":"X-WTBD-Schedule-Sources"});
    }
    let target;
    if(u.pathname==="/api/aircraft"){
