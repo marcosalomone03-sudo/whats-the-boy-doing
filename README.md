@@ -1,6 +1,6 @@
 # What's the boy doing? — flight tracker
 
-A personal flight-day tracker for Ryanair-group flights operating to or from Nuremberg (NUE).
+A personal flight-day tracker for Ryanair-group flights operating to or from Nuremberg (NUE). The app loads a refreshed global IATA airport catalogue with coordinates and IANA time zones, so airport codes such as VLC do not need to be hardcoded.
 
 ## Flight discovery
 
@@ -33,7 +33,7 @@ Displayed ADS-B information can include registration, aircraft type, callsign, I
 - Cloudflare Workers Free as the CORS/API bridge.
 - GitHub Pages for hosting.
 
-No AviationStack, FlightNerve, Aena or SkyLink integration is used by the current schedule pipeline.
+Airport reference data is generated from the MIT-licensed mwgg/Airports dataset and refreshed daily. It contains more airports than Ryanair serves; the official NUE board determines whether a route is actually scheduled. No AviationStack, FlightNerve, Aena or SkyLink integration is used by the current schedule pipeline.
 
 ## Development
 
