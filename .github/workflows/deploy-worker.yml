@@ -28,17 +28,6 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
 
-      - name: Configure FlightNerve API key (when provided)
-        if: env.FLIGHTNERVE_API_KEY != ''
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          secrets: |
-            FLIGHTNERVE_API_KEY
-        env:
-          FLIGHTNERVE_API_KEY: ${{ secrets.FLIGHTNERVE_API_KEY }}
-
       - name: Smoke-test live Worker endpoints
         env:
           WORKER_URL: https://wtbd-flight-proxy.marco-salomone-03.workers.dev
