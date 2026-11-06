@@ -1,10 +1,9 @@
-name: Probe official NUE board and Google fallback
+name: Probe NUE board and Google search results
 
 on:
   push:
     branches: [main]
-    paths:
-      - ".github/workflows/probe-airport-boards.yml"
+    paths: [".github/workflows/probe-airport-boards.yml"]
   workflow_dispatch:
 
 permissions:
@@ -13,30 +12,23 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - name: Inspect frontend requests and test Google fallback
+      - name: Probe exact public requests
         run: |
           node --input-type=module <<'NODE'
           const h={"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36","Accept":"application/json,text/html,*/*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"};
-          const page=await fetch("https://www.airport-nuernberg.de/en/flight-status",{headers:h});const html=await page.text();
-          const scripts=[...html.matchAll(/src="([^"]+\.js)"/g)].map(x=>new URL(x[1],"https://www.airport-nuernberg.de").href);
-          console.log("SCRIPTS",scripts);
-          for(const u of scripts){
-            const js=await (await fetch(u,{headers:h})).text();
-            for(const term of ["api/flight-status/","flightNumberField","hourMin","hourMax","filter-options"]){
-              let p=-1,n=0;while((p=js.indexOf(term,p+1))>=0&&n++<3)console.log("\nJS",term,js.slice(Math.max(0,p-900),Math.min(js.length,p+1900)));
-            }
-          }
           const base="https://airportnue-service.justrelate.io/production/api/flight-status";
-          for(const [direction,date] of [["departures","2026-11-06"],["departures","20261106"],["departures","06.11.2026"],["arrivals","2026-11-06"],["arrivals","20261106"],["arrivals","06.11.2026"]]){
-            const u=base+"/"+direction+"?lang=en&airportIata=NUE&flightNumber=&date="+encodeURIComponent(date)+"&hourMin=&hourMax=";
-            const r=await fetch(u,{headers:h});const t=await r.text();console.log("NUE",direction,date,"HTTP",r.status,"BODY",t.slice(0,900));
-          }
+          const qs=[
+            "lang=en&date=20261106",
+            "lang=en&airportIata=&date=20261106&hourMin=&hourMax=",
+            "lang=en&date=20261106&hourMin=&hourMax=",
+            "lang=en&airportIata=NUE&date=20261106",
+            "lang=en&airportIata=NUE&flightNumber=&date=20261106&hourMin=00&hourMax=24"
+          ];
+          for(const dir of ["departures","arrivals"])for(const q of qs){const r=await fetch(base+"/"+dir+"?"+q,{headers:h});const t=await r.text();console.log("NUE",dir,q,"HTTP",r.status,"BODY",t.slice(0,1400));}
           const q="Ryanair flight NUE ALC 6 November 2026 flight number schedule";
-          const gu="https://www.google.com/search?q="+encodeURIComponent(q)+"&num=10&hl=en&gl=de";
-          const gr=await fetch(gu,{headers:{"User-Agent":h["User-Agent"],"Accept":"text/html"}});
+          const gr=await fetch("https://www.google.com/search?q="+encodeURIComponent(q)+"&num=10&hl=en&gl=de",{headers:{"User-Agent":h["User-Agent"],"Accept":"text/html"}});
           const gt=await gr.text();
-          console.log("GOOGLE HTTP",gr.status,"URL",gr.url,"LEN",gt.length,"TITLE",gt.match(/<title>(.*?)<\/title>/is)?.[1]||"");
-          console.log("GOOGLE TEXT",gt.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,4500));
+          console.log("GOOGLE",gr.status,gt.length);
+          for(const term of ["FR904","FR","Ryanair","NUE","ALC","<div id=\"search\""]){const p=gt.indexOf(term);console.log("GOOGLE TERM",term,p,p>=0?gt.slice(Math.max(0,p-350),p+900):"");}
           NODE
