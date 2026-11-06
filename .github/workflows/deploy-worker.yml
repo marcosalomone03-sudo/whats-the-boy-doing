@@ -54,7 +54,7 @@ jobs:
             "flights:", schedule.data.days.reduce((n, day) => n + (day.flights || []).length, 0),
             "sources:", schedule.response.headers.get("X-WTBD-Schedule-Sources") || "header missing");
 
-          const pmo = await request("/api/schedule?origin=PMO&destination=NUE&year=2026&month=11");
+          const pmo = await request("/api/schedule?origin=PMO&destination=NUE&year=2026&month=11&date=2026-11-06");
           if (!pmo.data || !Array.isArray(pmo.data.days)) throw new Error("PMO-NUE schedule did not return days[]");
           const nov6 = pmo.data.days.find(day => Number(day.day) === 6);
           const nov6Flights = (nov6?.flights || []).map(f => String(f.number || f.flightNumber || "").replace(/\\s/g, "").toUpperCase());
