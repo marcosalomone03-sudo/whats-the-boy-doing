@@ -1,6 +1,7 @@
 /**
  * What's the boy doing? — free API bridge
- * Deploy as a Cloudflare Worker. No API key is used.
+ * Official Aena airport boards are queried directly; SkyLink is an optional
+ * worldwide airport-board fallback configured with SKYLINK_API_KEY.
  * Routes:
  * Deployment pipeline: GitHub Actions publishes this Worker to Cloudflare.
  *   /api/schedule?origin=NUE&destination=BUD&year=2026&month=11
