@@ -105,8 +105,29 @@ export default {
     if(!/^[0-9a-f]{6}$/.test(hex))return cors(JSON.stringify({error:"Invalid ICAO hex"}),400,{"Content-Type":"application/json"});
     target="https://api.adsb.lol/v2/hex/"+hex;
    }else return cors(JSON.stringify({error:"Unknown endpoint"}),404,{"Content-Type":"application/json"});
-   const upstream=await fetch(target,{headers:{"Accept":"application/json"},cf:{cacheTtl:10,cacheEverything:true}});
-   return cors(await upstream.text(),upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json"});
+   // Free live-data fallback: ADSB.lol first, ADSB.fi second. Both expose
+   // compatible readsb/ADSBexchange-style v2 responses; neither assigns a
+   // public airline flight number to an aircraft.
+   const targets=[
+    {url:target,source:"ADSB.lol"},
+    {url:target.replace("https://api.adsb.lol/v2/","https://opendata.adsb.fi/api/v2/"),source:"ADSB.fi"}
+   ];
+   let lastResponse=null,lastText="";
+   for(const candidate of targets){
+    try{
+     const upstream=await fetch(candidate.url,{headers:{"Accept":"application/json"},cf:{cacheTtl:10,cacheEverything:true}});
+     const body=await upstream.text();
+     lastResponse=upstream;lastText=body;
+     if(!upstream.ok)continue;
+     let parsed=null;try{parsed=JSON.parse(body);}catch{}
+     const hasAircraft=Array.isArray(parsed?.ac)?parsed.ac.length>0:true;
+     if(hasAircraft){
+      return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","X-WTBD-ADS-B-Source":candidate.source,"Access-Control-Expose-Headers":"X-WTBD-ADS-B-Source"});
+     }
+    }catch(error){lastText=String(error);}
+   }
+   if(lastResponse)return cors(lastText,lastResponse.status,{"Content-Type":lastResponse.headers.get("Content-Type")||"application/json","X-WTBD-ADS-B-Source":"ADSB.lol + ADSB.fi unavailable"});
+   return cors(JSON.stringify({error:"Both free ADS-B sources are unavailable",detail:lastText}),502,{"Content-Type":"application/json"});
   }catch(error){return cors(JSON.stringify({error:"Upstream request failed",detail:String(error)}),502,{"Content-Type":"application/json"});}
  }
 };
