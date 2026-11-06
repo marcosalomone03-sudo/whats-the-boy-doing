@@ -15,21 +15,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Inspect public airport board data endpoints
+      - name: Test airport board JSON requests
         run: |
           node --input-type=module <<'NODE'
-          const headers={"User-Agent":"Mozilla/5.0 (compatible; WTBD-AirportBoardProbe/1.0)","Accept":"application/json,text/html,application/javascript,*/*"};
-          async function get(url){const r=await fetch(url,{headers,redirect:"follow",signal:AbortSignal.timeout(20000)});const t=await r.text();console.log("\nURL",url,"\nHTTP",r.status,"FINAL",r.url,"TYPE",r.headers.get("content-type"),"BYTES",t.length,"\nBODY",t.slice(0,7000));return t;}
-          const aena=await get("https://www.aena.es/publica/assets/js/applications/infovuelos/infovuelos.main.chunk.js?v=1.34");
-          for(const term of ["wpadesnueva","getDefaultAirport","ListaAeropuertosAena","sendParentDataAeropuertosAena","fetch(","axios","api/","AeropuertoProp"]){let p=-1,n=0;while((p=aena.toLowerCase().indexOf(term.toLowerCase(),p+1))>=0&&n++<5)console.log("\nAENA",term,aena.slice(Math.max(0,p-500),Math.min(aena.length,p+1000)));}
-          const bud=await get("https://www.bud.hu/build/assets/app-CYMcx8Ka.js");
-          for(const term of ["app-prod-bud","flight.search","flightSearch","flight-search","route:function","window.route","baseURL","axios.create"]){let p=-1,n=0;while((p=bud.toLowerCase().indexOf(term.toLowerCase(),p+1))>=0&&n++<4)console.log("\nBUD",term,bud.slice(Math.max(0,p-400),Math.min(bud.length,p+900)));}
-          const stnPage=await get("https://www.stanstedairport.co.uk/departures/");
-          for(const term of ["FR4208","__NEXT_DATA__","flightNumber","flightTime","departure","flightStatus","api/"]){let p=-1,n=0;while((p=stnPage.toLowerCase().indexOf(term.toLowerCase(),p+1))>=0&&n++<3)console.log("\nSTN HTML",term,stnPage.slice(Math.max(0,p-250),Math.min(stnPage.length,p+700)));}
+          const h={"User-Agent":"Mozilla/5.0 (compatible; WTBD/1.0)","Accept":"application/json,text/html,*/*","X-Requested-With":"XMLHttpRequest"};
+          async function get(url,headers=h){try{const r=await fetch(url,{headers,redirect:"follow",signal:AbortSignal.timeout(15000)});const t=await r.text();console.log("\nURL",url,"\nHTTP",r.status,"FINAL",r.url,"TYPE",r.headers.get("content-type"),"BYTES",t.length,"\nBODY",t.slice(0,4500));return t}catch(e){console.log("ERROR",url,String(e));return""}}
+          const budBase="https://www.bud.hu";
           for(const url of [
-            "https://www.airport-nuernberg.de/api/flight-status/departures?lang=en&airportIata=NUE&date=20261106",
-            "https://www.airport-nuernberg.de/api/flight-status/arrivals?lang=en&airportIata=NUE&date=20261106",
-            "https://www.bud.hu/flight-search/quick",
-            "https://app-prod-bud-web-brata3fggtb9dacx.northeurope-01.azurewebsites.net"
-          ]){try{await get(url)}catch(e){console.log("\nPROBE ERROR",url,String(e))}}
+            budBase+"/ajax/flight-search/quick?locale=en&query=NUE&date=2026-11-06&direction=departures",
+            budBase+"/ajax/flight-search/quick?locale=en&query=&date=2026-11-06&direction=departures",
+            budBase+"/ajax/flight-search?locale=en&query=NUE&date=2026-11-06&time=&hideDeparted=false&hideArrived=false&direction=departures",
+            budBase+"/ajax/flight-search?locale=en&query=&date=2026-11-06&time=&hideDeparted=false&hideArrived=false&direction=departures"
+          ])await get(url);
+          const nueHosts=["https://www.airport-nuernberg.de","https://airport-nuernberg.justrelate.io","https://airportnue-service.justrelate.io"];
+          for(const host of nueHosts)for(const dir of ["departures","arrivals"])await get(host+"/api/flight-status/"+dir+"?lang=en&airportIata=NUE&date=20261106");
+          const aena=await get("https://www.aena.es/publica/assets/js/applications/infovuelos/infovuelos.main.chunk.js?v=1.34");
+          console.log("\nAENA FETCH CALLS",JSON.stringify([...aena.matchAll(/fetch\([^)]{0,500}/g)].map(x=>x[0]).slice(-35)));
+          console.log("\nAENA URL STRINGS",JSON.stringify([...new Set(aena.match(/["'](?:https?:)?\/\/[^"']+|["']\/[^"']*(?:flight|vuelo|aena|airport|satellite)[^"']*/gi)||[])].slice(0,80)));
+          const stn="https://www.stanstedairport.co.uk/_next/static/chunks/pages/%5B%5B...slug%5D%5D-96e84ff7efc9bb4e.js";
+          const js=await get(stn);
+          for(const term of ["flightStatus","flightNumber","departure","arrivals","departures","api/","fetch(","axios","flightInfo"]){let p=-1,n=0;while((p=js.toLowerCase().indexOf(term.toLowerCase(),p+1))>=0&&n++<3)console.log("\nSTN",term,js.slice(Math.max(0,p-300),Math.min(js.length,p+800)));}
           NODE
