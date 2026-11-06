@@ -1,0 +1,19 @@
+name = "wtbd-site"
+compatibility_date = "2026-11-06"
+workers_dev = true
+
+[assets]
+directory = "."
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = false
+include = [
+  "index.html",
+  "app.js",
+  "config.js",
+  "airports.json",
+  "manifest.webmanifest",
+  "sw.js",
+  "icon-192.png",
+  "icon-512.png"
+]
