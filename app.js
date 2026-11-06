@@ -212,20 +212,54 @@
     return normalizeSchedule(data,origin,destination,date);
   }
 
+  function overflightRows(data) {
+    if (Array.isArray(data)) return data;
+    for (const key of ["overflights","aircraft","results","items","ac"]) if (Array.isArray(data?.[key])) return data[key];
+    return [];
+  }
+  async function queryAirportOverflights(flight,which) {
+    const ap=airport(which==="departure"?flight.origin:flight.destination);
+    const eventTime=which==="departure"?flight.departure:flight.arrival;
+    // Free FlyItalyADSB tier: max 10 km and 6 hours per request.
+    const from=new Date(eventTime.getTime()-2*3600000);
+    const to=new Date(eventTime.getTime()+2*3600000);
+    const qs=new URLSearchParams({lat:String(ap.lat),lon:String(ap.lon),dist:"10",from:from.toISOString(),to:to.toISOString()});
+    const data=await get("/api/overflights?"+qs.toString());
+    return overflightRows(data).map(row=>({...row,checkpoint:which,flight}));
+  }
   async function loadObserved(date) {
     state.observed=[];
-    const now=new Date(); const today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
-    if(date>=today){renderObserved('Same-day observed-flight lookup is being prepared; live ADS-B is still checked below. Historical airport records become available after the next processing cycle.');return;}
-    const results=await Promise.all(['departures','arrivals'].map(type=>get('/api/observed?airport=NUE&type='+type+'&date='+encodeURIComponent(date))));
-    const rows=results.flatMap(x=>Array.isArray(x)?x:(x.flights||x.results||x.items||[]));
-    for(const f of state.flights)for(const r of rows){if(String(r?.from?.iata||'').toUpperCase()!==f.origin||String(r?.to?.iata||'').toUpperCase()!==f.destination)continue;state.observed.push({flight:f,record:r});}
-    renderObserved();
+    const flights=state.flights.filter(f=>f.date===date);
+    if (!flights.length) { renderObserved("No scheduled sectors found for this date, so there are no airport overflight windows to check."); return; }
+    const tasks=[];
+    for (const flight of flights) { tasks.push(queryAirportOverflights(flight,"departure")); tasks.push(queryAirportOverflights(flight,"arrival")); }
+    const results=await Promise.allSettled(tasks);
+    const errors=[];
+    for (const result of results) { if(result.status==="fulfilled") state.observed.push(...result.value); else errors.push(result.reason?.message||"FlyItalyADSB overflight query failed"); }
+    const dedup=new Map();
+    for (const item of state.observed) {
+      const hex=String(item.icao||item.hex||"").toLowerCase(); if(!hex) continue;
+      const key=[item.flight.flightNumber,item.flight.origin,item.flight.destination,hex,item.checkpoint].join("|");
+      dedup.set(key,item);
+    }
+    state.observed=[...dedup.values()];
+    renderObserved(errors.length?"Some FlyItalyADSB checks failed: "+[...new Set(errors)].join(" · "):"");
   }
   function renderObserved(message) {
-    const el=$('observedFlights');if(!el)return;
-    if(message){el.textContent=message;return;}
-    if(!state.observed.length){el.textContent='No matching aircraft observations returned. Receiver coverage can be incomplete; this does not prove the flight did not operate.';return;}
-    el.textContent=state.observed.map(x=>{const r=x.record,f=x.flight;const dep=r.from?.time?fmt(new Date(Number(r.from.time)*1000),airport(f.origin).tz):'—';const arr=r.to?.time?fmt(new Date(Number(r.to.time)*1000),airport(f.destination).tz):'—';return f.origin+' → '+f.destination+' | '+(r.r||'Registration unavailable')+' | '+(r.t||'Type unavailable')+' | HEX '+(r.icao||'—')+' | DEP '+dep+' ('+(r.from?.seen||'—')+') | ARR '+arr+' ('+(r.to?.seen||'—')+')';}).join('\n\n')+'\n\nTimes are ADS-B observations near airports, not airline-confirmed touchdown times. No callsign matching is used.';
+    const el=$("observedFlights"); if(!el)return;
+    if(!state.observed.length) { el.textContent=message||"FlyItalyADSB did not return aircraft near the selected airports in the scheduled time windows. Coverage gaps are possible; this does not prove the flight did not operate."; return; }
+    const groups=new Map();
+    for(const item of state.observed) {
+      const f=item.flight,hex=String(item.icao||item.hex||"").toLowerCase(),key=[f.flightNumber,f.origin,f.destination,hex].join("|");
+      if(!groups.has(key)) groups.set(key,{flight:f,hex,registration:item.r||"Registration unavailable",type:item.t||"Type unavailable",departure:false,arrival:false,records:[]});
+      const group=groups.get(key); group[item.checkpoint]=true; group.records.push(item);
+    }
+    const lines=[...groups.values()].map(g=>{
+      const times=g.records.map(r=>r.closest_time?new Date(Number(r.closest_time)*1000).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable").join(", ");
+      const checkpoints=[g.departure?"near departure airport":"",g.arrival?"near arrival airport":""].filter(Boolean).join(" + ");
+      return g.flight.flightNumber+" · "+g.flight.origin+" → "+g.flight.destination+"\n"+g.registration+" · "+g.type+" · HEX "+g.hex+"\nObserved "+checkpoints+" · "+times;
+    });
+    el.textContent=lines.join("\n\n")+"\n\nSource: FlyItalyADSB overflights (ADS-B/MLAT). Same ICAO observed near both airports is stronger evidence; one airport alone is not flight confirmation. Callsigns are not used to match flights."+(message?"\n\n"+message:"");
   }
   const EARTH_NM = 3440.065;
   const RAD = Math.PI/180;
@@ -451,7 +485,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; renderObserved('Loading observed flight history…');
+    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; renderObserved('Loading FlyItalyADSB overflight checks…');
     $("candidates").className="empty"; $("candidates").textContent="Searching timetable and live aircraft…";
     $("connection").textContent="Checking timetable…"; $("lastUpdated").textContent="SEARCHING";
     try {
@@ -459,7 +493,7 @@
       const scheduleErrors=[];
       responses.forEach((r,i)=>{ if(r.status==="fulfilled")state.flights.push(...r.value); else scheduleErrors.push(`${routes[i].join("-")}: ${r.reason?.message||"schedule unavailable"}`); });
       state.flights.sort((a,b)=>a.departure-b.departure); render();
-      try { await loadObserved(date); } catch(e) { renderObserved('Observed flight history unavailable: '+(e.message||'API error')); }
+      try { await loadObserved(date); } catch(e) { renderObserved("FlyItalyADSB overflight checks unavailable: "+(e.message||"API error")); }
       const deviceNow=new Date();
       const today=[deviceNow.getFullYear(),String(deviceNow.getMonth()+1).padStart(2,"0"),String(deviceNow.getDate()).padStart(2,"0")].join("-");
       if (date !== today) {
