@@ -390,7 +390,9 @@
     const origin=airport(flight.origin), destination=airport(flight.destination);
     if (!origin || !destination) throw new Error("Airport coordinates are not available for this route.");
     const now=Date.now(), dep=flight.departure.getTime(), arr=flight.arrival.getTime();
-    if (now < dep-180*60000 || now > arr+30*60000) return [];
+    // Keep the inbound leg eligible after landing so the same aircraft can be
+    // evaluated against the following outbound sector at NUE.
+    if (now < dep-180*60000 || now > arr+180*60000) return [];
 
     const durationMinutes=Math.max(30,(arr-dep)/60000);
     const elapsedMinutes=(now-dep)/60000;
