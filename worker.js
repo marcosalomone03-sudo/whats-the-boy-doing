@@ -8,6 +8,13 @@
  *   /api/hex?icao=4CA123
  */
 const MONTHS={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+function cors(body,status=200,headers={}) {
+ const responseHeaders=new Headers(headers);
+ responseHeaders.set("Access-Control-Allow-Origin","*");
+ responseHeaders.set("Access-Control-Allow-Methods","GET, OPTIONS");
+ responseHeaders.set("Access-Control-Allow-Headers","Content-Type, Accept");
+ return new Response(status===204?null:body,{status,headers:responseHeaders});
+}
 function decodeHtml(s){return String(s).replace(/&nbsp;|&#160;/gi," ").replace(/&amp;/gi,"&").replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/&lt;/gi,"<").replace(/&gt;/gi,">");}
 function flightInfoRows(html,flightNumber,origin,destination,year,month){
  const clean=decodeHtml(String(html).replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\s+/g," "));
