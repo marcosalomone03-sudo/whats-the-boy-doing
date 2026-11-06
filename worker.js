@@ -111,19 +111,34 @@ export default {
     const body=await upstream.text();
     return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"public, max-age=60","X-WTBD-Observed-Source":"FlyItalyADSB"});
    }
-   let target;
+   let target,hex="";
    if(u.pathname==="/api/aircraft"){
     const lat=Number(u.searchParams.get("lat")),lon=Number(u.searchParams.get("lon")),dist=Number(u.searchParams.get("dist")||35);
     if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||dist<1||dist>250)return cors(JSON.stringify({error:"Invalid ADS-B search parameters"}),400,{"Content-Type":"application/json"});
     target="https://api.adsb.lol/v2/lat/"+lat+"/lon/"+lon+"/dist/"+dist;
+    // The app expresses radius in nautical miles. FlyItalyADSB /v2 expects kilometres.
+    const km=Math.min(500,Math.round(dist*1.852));
+    if(env.FLYITALYADSB_API_KEY){
+     const primary="https://api.flyitalyadsb.com/v2/lat/"+lat+"/lon/"+lon+"/dist/"+km;
+     try{
+      const live=await fetch(primary,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/12.0"},cf:{cacheTtl:2,cacheEverything:true}});
+      const body=await live.text();let parsed=null;try{parsed=JSON.parse(body);}catch{}
+      if(live.ok&&Array.isArray(parsed?.ac))return cors(JSON.stringify(parsed),200,{"Content-Type":"application/json","Cache-Control":"no-store","X-WTBD-ADS-B-Source":"FlyItalyADSB","Access-Control-Expose-Headers":"X-WTBD-ADS-B-Source"});
+     }catch(error){/* fall through to public ADS-B feeds */}
+    }
    }else if(u.pathname==="/api/hex"){
-    const hex=(u.searchParams.get("icao")||"").toLowerCase();
+    hex=(u.searchParams.get("icao")||"").toLowerCase();
     if(!/^[0-9a-f]{6}$/.test(hex))return cors(JSON.stringify({error:"Invalid ICAO hex"}),400,{"Content-Type":"application/json"});
     target="https://api.adsb.lol/v2/hex/"+hex;
+    if(env.FLYITALYADSB_API_KEY){
+     try{
+      const live=await fetch("https://api.flyitalyadsb.com/v2/icao/"+hex,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/12.0"},cf:{cacheTtl:2,cacheEverything:true}});
+      const body=await live.text();let parsed=null;try{parsed=JSON.parse(body);}catch{}
+      if(live.ok&&parsed&&String(parsed.hex||"").toLowerCase()===hex)return cors(JSON.stringify({ac:[parsed]}),200,{"Content-Type":"application/json","Cache-Control":"no-store","X-WTBD-ADS-B-Source":"FlyItalyADSB","Access-Control-Expose-Headers":"X-WTBD-ADS-B-Source"});
+     }catch(error){/* fall through to public ADS-B feeds */}
+    }
    }else return cors(JSON.stringify({error:"Unknown endpoint"}),404,{"Content-Type":"application/json"});
-   // Free live-data fallback: ADSB.lol first, ADSB.fi second. Both expose
-   // compatible readsb/ADSBexchange-style v2 responses; neither assigns a
-   // public airline flight number to an aircraft.
+   // Fallbacks use nautical miles and readsb-compatible responses.
    const targets=[
     {url:target,source:"ADSB.lol"},
     {url:target.replace("https://api.adsb.lol/v2/","https://opendata.adsb.fi/api/v2/"),source:"ADSB.fi"}
@@ -131,19 +146,19 @@ export default {
    let lastResponse=null,lastText="";
    for(const candidate of targets){
     try{
-     const upstream=await fetch(candidate.url,{headers:{"Accept":"application/json"},cf:{cacheTtl:10,cacheEverything:true}});
+     const upstream=await fetch(candidate.url,{headers:{"Accept":"application/json"},cf:{cacheTtl:2,cacheEverything:true}});
      const body=await upstream.text();
      lastResponse=upstream;lastText=body;
      if(!upstream.ok)continue;
      let parsed=null;try{parsed=JSON.parse(body);}catch{}
      const hasAircraft=Array.isArray(parsed?.ac)?parsed.ac.length>0:true;
      if(hasAircraft){
-      return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","X-WTBD-ADS-B-Source":candidate.source,"Access-Control-Expose-Headers":"X-WTBD-ADS-B-Source"});
+      return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"no-store","X-WTBD-ADS-B-Source":candidate.source,"Access-Control-Expose-Headers":"X-WTBD-ADS-B-Source"});
      }
     }catch(error){lastText=String(error);}
    }
    if(lastResponse)return cors(lastText,lastResponse.status,{"Content-Type":lastResponse.headers.get("Content-Type")||"application/json","X-WTBD-ADS-B-Source":"ADSB.lol + ADSB.fi unavailable"});
-   return cors(JSON.stringify({error:"Both free ADS-B sources are unavailable",detail:lastText}),502,{"Content-Type":"application/json"});
+   return cors(JSON.stringify({error:"All free ADS-B sources are unavailable",detail:lastText}),502,{"Content-Type":"application/json"});
   }catch(error){return cors(JSON.stringify({error:"Upstream request failed",detail:String(error)}),502,{"Content-Type":"application/json"});}
  }
 };
