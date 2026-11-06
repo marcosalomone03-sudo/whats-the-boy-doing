@@ -55,6 +55,21 @@ jobs:
             "sources:", schedule.response.headers.get("X-WTBD-Schedule-Sources") || "header missing",
             "fallback diagnostic:", schedule.response.headers.get("X-WTBD-Schedule-Fallback-Error") || schedule.data._wtbdFallbackError || "none");
 
+          for (const url of [
+            "https://www.flightera.net/en/flight/Ryanair-Palermo-Nurnberg/FR904",
+            "https://free.flightradar24.com/data/flights/fr904",
+            "https://data-live.flightradar24.com/data/flights/fr904",
+            "https://2lnr.com/routes/pmo-nue",
+            "https://www.airnavradar.com/data/flights/FR904",
+            "https://www.planemapper.com/flights/FR904"
+          ]) {
+            try {
+              const res = await fetch(url, { headers: { Accept: "text/html", "User-Agent": "Mozilla/5.0 (compatible; WTBD/1.0)" } });
+              const body = await res.text();
+              console.log("INFO fallback probe:", new URL(url).hostname, res.status, "bytes:", body.length,
+                "FR904:", body.includes("FR904"), "Nov6:", /06\\s*Nov|Nov\\s*6|6\\s+Nov/i.test(body));
+            } catch (error) { console.log("INFO fallback probe:", new URL(url).hostname, "ERROR", String(error).slice(0,120)); }
+          }
           const fi = await fetch("https://www.flight.info/FR904", { headers: { Accept: "text/html", "User-Agent": "Mozilla/5.0 (compatible; WTBD/1.0)" } });
           const fiHtml = await fi.text();
           console.log("INFO Flight.info direct:", fi.status, "bytes:", fiHtml.length,
