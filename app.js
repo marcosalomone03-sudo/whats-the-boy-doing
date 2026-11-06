@@ -360,7 +360,8 @@
       </div><div class="notice">ADS-B position age: ${Math.round(numeric(ac.seen)||0)} seconds. This is observational data, not airline-confirmed flight status.</div>`;
   }
   function render() {
-    const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();\n    const missingGoogleLinks=state.googleLinks.filter(x=>!flights.some(f=>x.route===f.origin+"-"+f.destination));
+    const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();
+    const missingGoogleLinks=state.googleLinks.filter(x=>!flights.some(f=>x.route===f.origin+"-"+f.destination));
     $("sectors").innerHTML=(flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)} · ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small></div><div class="time">${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>arr ${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</small></div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`)+(missingGoogleLinks.length?`<div class="notice">Google fallback searches (only routes without a scheduled result): ${missingGoogleLinks.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.route)} ↗</a>`).join(" · ")}</div>`:"");
     $("sectorCount").textContent=flights.length+" SECTORS";
     const next=flights.find(f=>f.departure>now);
