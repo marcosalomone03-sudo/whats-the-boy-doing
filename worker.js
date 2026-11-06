@@ -123,7 +123,7 @@ export default {
      try{
       const live=await fetch(primary,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/12.0"},cf:{cacheTtl:2,cacheEverything:true}});
       const body=await live.text();let parsed=null;try{parsed=JSON.parse(body);}catch{}
-      if(live.ok&&Array.isArray(parsed?.ac))return cors(JSON.stringify(parsed),200,{"Content-Type":"application/json","Cache-Control":"no-store","X-WTBD-ADS-B-Source":"FlyItalyADSB","Access-Control-Expose-Headers":"X-WTBD-ADS-B-Source"});
+      if(live.ok&&Array.isArray(parsed?.ac)&&parsed.ac.length>0)return cors(JSON.stringify(parsed),200,{"Content-Type":"application/json","Cache-Control":"no-store","X-WTBD-ADS-B-Source":"FlyItalyADSB","Access-Control-Expose-Headers":"X-WTBD-ADS-B-Source"});
      }catch(error){/* fall through to public ADS-B feeds */}
     }
    }else if(u.pathname==="/api/hex"){
