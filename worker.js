@@ -16,8 +16,8 @@ async function flightNerveFlights(origin,destination,date,key){
  let route;try{route=await routeResponse.json();}catch{return [];}
  const candidates=[...new Set((Array.isArray(route.flights)?route.flights:[])
   .filter(item=>String(item.airline||"").toUpperCase()==="FR")
-  .map(item=>String(item.flight||"").toUpperCase().replace(/\\s/g,""))
-  .filter(number=>/^FR\\d+$/.test(number)))].slice(0,8);
+  .map(item=>String(item.flight||"").toUpperCase().replace(/\s/g,""))
+  .filter(number=>/^FR\d+$/.test(number)))].slice(0,8);
  const dateKey=date.replace(/-/g,"");
  const results=await Promise.allSettled(candidates.map(async flight=>{
   const number=flight.slice(2);
@@ -42,38 +42,6 @@ function cors(body,status=200,headers={}) {
  responseHeaders.set("Access-Control-Allow-Methods","GET, OPTIONS");
  responseHeaders.set("Access-Control-Allow-Headers","Content-Type, Accept");
  return new Response(status===204?null:body,{status,headers:responseHeaders});
-}
-function decodeHtml(s){return String(s).replace(/&nbsp;|&#160;/gi," ").replace(/&amp;/gi,"&").replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/&lt;/gi,"<").replace(/&gt;/gi,">");}
-function flightInfoRows(html,flightNumber,origin,destination,year,month){
- const clean=decodeHtml(String(html).replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\s+/g," "));
- const marker="Upcoming scheduled flights in the coming 30 days",pos=clean.toLowerCase().indexOf(marker.toLowerCase());
- if(pos<0)return [];
- const durationMatch=clean.match(/Duration\\s+(\\d+)\\s*h\\s*(\\d+)\\s*m/i);
- const durationMinutes=durationMatch?Number(durationMatch[1])*60+Number(durationMatch[2]):null;
- const section=clean.slice(pos+marker.length),dateRe=/\\b(\\d{1,2})\\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})\\b/g,dates=[...section.matchAll(dateRe)],rows=[];
- for(let i=0;i<dates.length;i++){
-  const m=dates[i],day=Number(m[1]),mo=MONTHS[m[2]],yr=Number(m[3]),chunk=section.slice(m.index+m[0].length,dates[i+1]?.index??section.length);
-  if(yr!==year||mo!==month)continue;
-  const times=[...chunk.matchAll(/\\b([01]\\d|2[0-3]):([0-5]\\d)\\b/g)],codes=[...chunk.matchAll(/\\(([A-Z]{3})\\)/g)].map(x=>x[1]);
-  if(times.length<1||!codes.includes(origin)||!codes.includes(destination))continue;
-  let arrivalTime=times[1]?.[0]||"";
-  if(!arrivalTime&&durationMinutes!==null){
-   const [hours,minutes]=times[0][0].split(":").map(Number),total=(hours*60+minutes+durationMinutes)%1440;
-   arrivalTime=String(Math.floor(total/60)).padStart(2,"0")+":"+String(total%60).padStart(2,"0");
-  }
-  if(!arrivalTime)continue;
-  rows.push({day,flight:{carrierCode:"FR",number:flightNumber.replace(/^FR/i,""),departureTime:times[0][0],arrivalTime}});
- }
- return rows;
-}
-async function enrichRyanairSchedule(data,origin,destination,year,month){
- if(!data||!Array.isArray(data.days))return data;
- const numbers=[...new Set(data.days.flatMap(day=>(day.flights||[]).map(f=>{const raw=String(f.flightNumber||f.number||"").toUpperCase().replace(/\s+/g,"");return /^[A-Z]{2,3}\d/.test(raw)?raw:(f.carrierCode||"FR")+raw;}).filter(n=>/^FR\d+$/i.test(n))))].slice(0,4);
- if(!numbers.length)return data;
- const results=await Promise.allSettled(numbers.map(async number=>{const response=await fetch("https://www.flight.info/"+encodeURIComponent(number),{headers:{"Accept":"text/html","User-Agent":"Mozilla/5.0 (compatible; WTBD/1.0)"}});if(!response.ok)return [];return flightInfoRows(await response.text(),number,origin,destination,year,month);}));
- const byDay=new Map(data.days.map(day=>[Number(day.day),day]));
- for(const result of results){if(result.status!=="fulfilled")continue;for(const row of result.value){let day=byDay.get(row.day);if(!day){day={day:row.day,flights:[]};byDay.set(row.day,day);data.days.push(day);}if(!day.flights.some(f=>String(f.number||f.flightNumber||"").replace(/\s/g,"").toUpperCase()==="FR"+row.flight.number))day.flights.push(row.flight);}}
- data.days.sort((a,b)=>Number(a.day)-Number(b.day));return data;
 }
 export default {
  async fetch(request, env) {
