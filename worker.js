@@ -20,13 +20,21 @@ function flightInfoRows(html,flightNumber,origin,destination,year,month){
  const clean=decodeHtml(String(html).replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\s+/g," "));
  const marker="Upcoming scheduled flights in the coming 30 days",pos=clean.toLowerCase().indexOf(marker.toLowerCase());
  if(pos<0)return [];
- const section=clean.slice(pos+marker.length),dateRe=/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})\b/g,dates=[...section.matchAll(dateRe)],rows=[];
+ const durationMatch=clean.match(/Duration\\s+(\\d+)\\s*h\\s*(\\d+)\\s*m/i);
+ const durationMinutes=durationMatch?Number(durationMatch[1])*60+Number(durationMatch[2]):null;
+ const section=clean.slice(pos+marker.length),dateRe=/\\b(\\d{1,2})\\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})\\b/g,dates=[...section.matchAll(dateRe)],rows=[];
  for(let i=0;i<dates.length;i++){
   const m=dates[i],day=Number(m[1]),mo=MONTHS[m[2]],yr=Number(m[3]),chunk=section.slice(m.index+m[0].length,dates[i+1]?.index??section.length);
   if(yr!==year||mo!==month)continue;
-  const times=[...chunk.matchAll(/\b([01]\d|2[0-3]):([0-5]\d)\b/g)],codes=[...chunk.matchAll(/\(([A-Z]{3})\)/g)].map(x=>x[1]);
-  if(times.length<2||!codes.includes(origin)||!codes.includes(destination))continue;
-  rows.push({day,flight:{carrierCode:"FR",number:flightNumber.replace(/^FR/i,""),departureTime:times[0][0],arrivalTime:times[1][0]}});
+  const times=[...chunk.matchAll(/\\b([01]\\d|2[0-3]):([0-5]\\d)\\b/g)],codes=[...chunk.matchAll(/\\(([A-Z]{3})\\)/g)].map(x=>x[1]);
+  if(times.length<1||!codes.includes(origin)||!codes.includes(destination))continue;
+  let arrivalTime=times[1]?.[0]||"";
+  if(!arrivalTime&&durationMinutes!==null){
+   const [hours,minutes]=times[0][0].split(":").map(Number),total=(hours*60+minutes+durationMinutes)%1440;
+   arrivalTime=String(Math.floor(total/60)).padStart(2,"0")+":"+String(total%60).padStart(2,"0");
+  }
+  if(!arrivalTime)continue;
+  rows.push({day,flight:{carrierCode:"FR",number:flightNumber.replace(/^FR/i,""),departureTime:times[0][0],arrivalTime}});
  }
  return rows;
 }
