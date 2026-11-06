@@ -30,7 +30,7 @@ function normalizeBoardRows(payload,origin,destination,date,direction){
   const number=airline+numberPart;
   const other=String(direction==="departures"?row?.toAirport?.iata:row?.fromAirport?.iata||"").toUpperCase();
   const localDate=Number(row?.scheduledLocalDate||0);
-  if(!/^((FR|RK)\d{1,5})$/.test(number))return null;
+  if(!/^((FR|RK|RR|OE)\d{1,5})$/.test(number))return null;
   if(other!==expectedOther||localDate!==wantedDate)return null;
   const boardTime=localNueTime(row?.scheduledTime);
   if(!boardTime)return null;
@@ -58,9 +58,9 @@ async function googleFlights(origin,destination,date){
  const response=await fetch(url,{headers:{"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36","Accept":"text/html"},cf:{cacheTtl:300,cacheEverything:true}});
  if(!response.ok)return [];
  const html=await response.text();
- if(html.length<3000||/unusual traffic|sorry\/index|consent\.google/i.test(html))return [];
+ if(html.length<3000||/unusual traffic|sorry\/index|consent\.google|having trouble accessing Google Search|id="yvlrue"/i.test(html))return [];
  const text=stripHtml(html);
- const matches=[...text.matchAll(/\b(?:FR|RK)\s?\d{1,5}\b/gi)];
+ const matches=[...text.matchAll(/\b(?:FR|RK|RR|OE)\s?\d{1,5}\b/gi)];
  const results=[];
  for(const match of matches){
   const start=Math.max(0,match.index-220),end=Math.min(text.length,match.index+260);
