@@ -73,6 +73,7 @@ export default {
      // The optional secondary source must never take down the primary timetable.
      source="Ryanair timetable (fallback unavailable)";
      var fallbackDiagnostic=String(fallbackError).slice(0,180);
+     schedule._wtbdFallbackError=fallbackDiagnostic;
     }
     return cors(JSON.stringify(schedule),200,{"Content-Type":"application/json","X-WTBD-Schedule-Sources":source,...(typeof fallbackDiagnostic!=="undefined"?{"X-WTBD-Schedule-Fallback-Error":fallbackDiagnostic}:{})});
    }
