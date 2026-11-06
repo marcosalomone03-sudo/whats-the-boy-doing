@@ -27,3 +27,44 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+
+      - name: Smoke-test live Worker endpoints
+        env:
+          WORKER_URL: https://wtbd-flight-proxy.marco-salomone-03.workers.dev
+        run: |
+          node --input-type=module <<'NODE'
+          const base = process.env.WORKER_URL;
+          async function request(path, accepted = [200]) {
+            const response = await fetch(base + path, { headers: { Accept: "application/json" } });
+            const raw = await response.text();
+            let data;
+            try { data = JSON.parse(raw); } catch { throw new Error(path + ": response is not valid JSON (HTTP " + response.status + ")"); }
+            if (!accepted.includes(response.status)) {
+              throw new Error(path + ": unexpected HTTP " + response.status + " — " + (data.detail || data.error || raw.slice(0, 250)));
+            }
+            console.log("PASS", path, "HTTP", response.status);
+            return { response, data };
+          }
+
+          const schedule = await request("/api/schedule?origin=NUE&destination=BUD&year=2026&month=11");
+          if (!schedule.data || !Array.isArray(schedule.data.days)) {
+            throw new Error("Schedule endpoint did not return the expected days[] structure");
+          }
+          console.log("INFO schedule days:", schedule.data.days.length,
+            "flights:", schedule.data.days.reduce((n, day) => n + (day.flights || []).length, 0),
+            "sources:", schedule.response.headers.get("X-WTBD-Schedule-Sources") || "header missing");
+
+          const aircraft = await request("/api/aircraft?lat=51.4700&lon=-0.4543&dist=35");
+          if (!aircraft.data || !Array.isArray(aircraft.data.ac)) {
+            throw new Error("Aircraft endpoint did not return the expected ac[] structure");
+          }
+          console.log("INFO aircraft observed:", aircraft.data.ac.length);
+
+          const hex = aircraft.data.ac.find(item => /^[0-9a-f]{6}$/i.test(String(item.hex || "")))?.hex;
+          if (hex) {
+            await request("/api/hex?icao=" + encodeURIComponent(hex));
+          } else {
+            await request("/api/hex?icao=abcdef", [200, 404]);
+            console.log("INFO no aircraft hex was available for a positive lookup; syntax and upstream response checked");
+          }
+          NODE
