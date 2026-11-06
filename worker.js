@@ -54,7 +54,7 @@ export default {
     const d=(u.searchParams.get("destination")||"").toUpperCase();
     const y=Number(u.searchParams.get("year")), m=Number(u.searchParams.get("month"));
     const selectedDate=u.searchParams.get("date")||"";
-    if(!/^[A-Z]{3}$/.test(o)||!/^[A-Z]{3}$/.test(d)||y<2024||y>2035||m<1||m>12||(selectedDate&&!/^\\d{4}-\\d{2}-\\d{2}$/.test(selectedDate))) return cors(JSON.stringify({error:"Invalid schedule parameters"}),400,{"Content-Type":"application/json"});
+    if(!/^[A-Z]{3}$/.test(o)||!/^[A-Z]{3}$/.test(d)||y<2024||y>2035||m<1||m>12||(selectedDate&&!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate))) return cors(JSON.stringify({error:"Invalid schedule parameters"}),400,{"Content-Type":"application/json"});
     target=`https://services-api.ryanair.com/timtbl/3/schedules/${o}/${d}/years/${y}/months/${m}`;
    } else if (u.pathname === "/api/aircraft") {
     const lat=Number(u.searchParams.get("lat")), lon=Number(u.searchParams.get("lon")), dist=Number(u.searchParams.get("dist")||35);
