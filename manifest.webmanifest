@@ -1,25 +1,21 @@
 {
   "name": "What's the boy doing?",
-  "short_name": "Boy Tracker",
-  "description": "Personal flight-day tracker",
+  "short_name": "Boy doing?",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#06111c",
   "theme_color": "#071421",
-  "orientation": "portrait",
   "icons": [
     {
       "src": "./icon-192.png",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
+      "type": "image/png"
     },
     {
       "src": "./icon-512.png",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
+      "type": "image/png"
     }
   ]
 }
