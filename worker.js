@@ -26,11 +26,11 @@ function normalizeBoardRows(payload,origin,destination,date,direction){
  const wantedDate=Number(dateCompact(date));
  return rows.map(row=>{
   const airline=String(row?.flight?.airline?.iata||"").toUpperCase();
-  const numberPart=String(row?.flight?.number||"").replace(/\\s/g,"");
+  const numberPart=String(row?.flight?.number||"").replace(/\s/g,"");
   const number=airline+numberPart;
   const other=String(direction==="departures"?row?.toAirport?.iata:row?.fromAirport?.iata||"").toUpperCase();
   const localDate=Number(row?.scheduledLocalDate||0);
-  if(!/^((FR|RK)\\d{1,5})$/.test(number))return null;
+  if(!/^((FR|RK)\d{1,5})$/.test(number))return null;
   if(other!==expectedOther||localDate!==wantedDate)return null;
   const boardTime=localNueTime(row?.scheduledTime);
   if(!boardTime)return null;
