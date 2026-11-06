@@ -255,11 +255,6 @@
     return get(`/api/aircraft?lat=${encodeURIComponent(point.lat)}&lon=${encodeURIComponent(point.lon)}&dist=${dist}`);
   }
   const RYANAIR_737_TYPES = new Set(["B738", "B38M", "B737"]);
-  const RYANAIR_CALLSIGN_PREFIXES = ["RYR", "RUK", "MAY", "BZZ", "RYS"];
-
-  function normalizedCallsign(value) {
-    return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  }
   // Callsigns are operational identifiers and are NOT derived from public flight numbers.
   // Do not use them to identify or reject an aircraft for a scheduled flight.
   function aircraftCompatibility(ac, flight) {
@@ -280,30 +275,6 @@
   function isKnownAirbus(type) {
     const t = String(type || "").toUpperCase();
     return /^(A318|A319|A320|A321|A20N|A21N|A332|A333|A339|A343|A346|A359|A35K|A388)$/.test(t) || t.startsWith("A32") || t.startsWith("A33") || t.startsWith("A34") || t.startsWith("A35");
-  }
-  function aircraftCompatibility(ac, flight) {
-    const type = String(ac.t || "").toUpperCase();
-    const call = normalizedCallsign(ac.flight);
-    const operator = String(ac.ownOp || ac.operator || "").toLowerCase();
-    const callMatch = callsignMatchesFlight(ac.flight, flight.flightNumber);
-    const groupCall = RYANAIR_CALLSIGN_PREFIXES.some(prefix => call.startsWith(prefix));
-    const operatorKnown = !!operator;
-    const operatorMatch = /ryanair|malta air|buzz|lauda|ryanair sun|ryanair uk/.test(operator);
-    if (isKnownAirbus(type)) return {ok:false, callMatch, groupCall, operatorMatch, typeMatch:false, reason:"Airbus excluded"};
-    const typeMatch = RYANAIR_737_TYPES.has(type);
-    // A broadcast Ryanair-group callsign for a DIFFERENT flight is negative evidence.
-    // Never let a generic group prefix (e.g. RYR) make another flight look like this one.
-    if (groupCall && !callMatch) {
-      return {ok:false, callMatch:false, groupCall:true, operatorMatch, typeMatch, reason:"Different Ryanair flight number"};
-    }
-    // If the feed explicitly identifies a different operator, never treat it as a Ryanair candidate.
-    if (operatorKnown && !operatorMatch) return {ok:false, callMatch, groupCall, operatorMatch:false, typeMatch, reason:"Different operator"};
-    // Exact flight callsign is strongest. If ADS-B omits callsign, a 737/operator candidate
-    // remains provisional and must pass the strict route, direction and timing checks below.
-    if (!callMatch && !operatorMatch && !typeMatch) {
-      return {ok:false, callMatch, groupCall, operatorMatch, typeMatch, reason:"No compatible aircraft evidence"};
-    }
-    return {ok:true, callMatch, groupCall, operatorMatch, typeMatch, operatorKnown};
   }
   async function findCandidates(flight) {
     const origin=airport(flight.origin), destination=airport(flight.destination);
