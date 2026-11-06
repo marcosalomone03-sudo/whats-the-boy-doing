@@ -32,5 +32,6 @@ jobs:
             echo "Airport catalogue is already current."
           else
             git commit -m "Refresh global airport catalogue"
+            git pull --rebase origin main
             git push
           fi
