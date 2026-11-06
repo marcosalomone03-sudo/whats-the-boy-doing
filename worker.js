@@ -124,7 +124,7 @@ function cors(body,status=200,headers={}){
  return new Response(status===204?null:body,{status,headers:h});
 }
 
-const NUE_POOL_PREFIX="wtbd:nue-pool:v1:";
+const NUE_POOL_PREFIX="wtbd:nue-pool:v2:";
 const poolKey=d=>NUE_POOL_PREFIX+d;
 const dayISO=d=>d.toISOString().slice(0,10);
 function poolRows(p){if(Array.isArray(p))return p;for(const k of ["overflights","aircraft","results","items","ac"])if(Array.isArray(p?.[k]))return p[k];return [];}
