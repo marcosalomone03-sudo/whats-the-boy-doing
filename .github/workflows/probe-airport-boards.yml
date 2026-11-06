@@ -20,19 +20,16 @@ jobs:
           node --input-type=module <<'NODE'
           const h={"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36","Accept":"application/json,text/html,*/*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"};
           const page=await fetch("https://www.airport-nuernberg.de/en/flight-status",{headers:h});const html=await page.text();
-          const scripts=[...html.matchAll(/src="([^"]+\\.js)"/g)].map(x=>new URL(x[1],"https://www.airport-nuernberg.de").href);
+          const scripts=[...html.matchAll(/src="([^"]+\.js)"/g)].map(x=>new URL(x[1],"https://www.airport-nuernberg.de").href);
+          console.log("SCRIPTS",scripts);
           for(const u of scripts){
             const js=await (await fetch(u,{headers:h})).text();
             for(const term of ["api/flight-status/","flightNumberField","hourMin","hourMax","filter-options"]){
-              let p=-1,n=0;while((p=js.indexOf(term,p+1))>=0&&n++<4)console.log("\\nJS",u,term,js.slice(Math.max(0,p-1100),Math.min(js.length,p+2300)));
+              let p=-1,n=0;while((p=js.indexOf(term,p+1))>=0&&n++<3)console.log("\nJS",term,js.slice(Math.max(0,p-900),Math.min(js.length,p+1900)));
             }
           }
           const base="https://airportnue-service.justrelate.io/production/api/flight-status";
-          const variants=[
-            ["departures","2026-11-06"],["departures","20261106"],["departures","06.11.2026"],
-            ["arrivals","2026-11-06"],["arrivals","20261106"],["arrivals","06.11.2026"]
-          ];
-          for(const [direction,date] of variants){
+          for(const [direction,date] of [["departures","2026-11-06"],["departures","20261106"],["departures","06.11.2026"],["arrivals","2026-11-06"],["arrivals","20261106"],["arrivals","06.11.2026"]]){
             const u=base+"/"+direction+"?lang=en&airportIata=NUE&flightNumber=&date="+encodeURIComponent(date)+"&hourMin=&hourMax=";
             const r=await fetch(u,{headers:h});const t=await r.text();console.log("NUE",direction,date,"HTTP",r.status,"BODY",t.slice(0,900));
           }
@@ -40,6 +37,6 @@ jobs:
           const gu="https://www.google.com/search?q="+encodeURIComponent(q)+"&num=10&hl=en&gl=de";
           const gr=await fetch(gu,{headers:{"User-Agent":h["User-Agent"],"Accept":"text/html"}});
           const gt=await gr.text();
-          console.log("GOOGLE HTTP",gr.status,"URL",gr.url,"LEN",gt.length,"TITLE",(gt.match(/<title>(.*?)<\\/title>/is)||[])[1]||"");
-          console.log("GOOGLE TEXT",gt.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\\s+/g," ").slice(0,4500));
+          console.log("GOOGLE HTTP",gr.status,"URL",gr.url,"LEN",gt.length,"TITLE",gt.match(/<title>(.*?)<\/title>/is)?.[1]||"");
+          console.log("GOOGLE TEXT",gt.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,4500));
           NODE
