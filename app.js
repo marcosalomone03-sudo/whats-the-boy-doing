@@ -229,7 +229,7 @@
   }
   async function loadObserved(date) {
     state.observed=[];
-    const flights=state.flights.filter(f=>f.date===date);
+    const flights=state.flights.filter(f=>f.date===date).sort((a,b)=>Math.abs(Date.now()-a.departure.getTime())-Math.abs(Date.now()-b.departure.getTime())).slice(0,4);
     if (!flights.length) { renderObserved("No scheduled sectors found for this date, so there are no airport overflight windows to check."); return; }
     const tasks=[];
     for (const flight of flights) { tasks.push(queryAirportOverflights(flight,"departure")); tasks.push(queryAirportOverflights(flight,"arrival")); }
@@ -243,7 +243,7 @@
       dedup.set(key,item);
     }
     state.observed=[...dedup.values()];
-    const hexes=[...new Set(state.observed.map(x=>String(x.icao||x.hex||"").toLowerCase()))].filter(x=>/^[0-9a-f]{6}$/.test(x)).slice(0,10);
+    const hexes=[...new Set(state.observed.map(x=>String(x.icao||x.hex||"").toLowerCase()))].filter(x=>/^[0-9a-f]{6}$/.test(x)).slice(0,2);
     const tracks=await Promise.allSettled(hexes.map(icao=>get("/api/history?icao="+encodeURIComponent(icao)+"&date="+encodeURIComponent(date))));
     tracks.forEach((result,index)=>{
       if(result.status!=="fulfilled")return;
@@ -272,6 +272,33 @@
       return g.flight.flightNumber+" · "+g.flight.origin+" → "+g.flight.destination+"\n"+g.registration+" · "+g.type+" · HEX "+g.hex+"\nObserved "+checkpoints+" · "+times+trackLine;
     });
     el.textContent=lines.join("\n\n")+"\n\nSource: FlyItalyADSB overflights (ADS-B/MLAT). Same ICAO observed near both airports is stronger evidence; one airport alone is not flight confirmation. Callsigns are not used to match flights."+(message?"\n\n"+message:"");
+  }
+  function observedAircraftCandidates() {
+    const groups=new Map();
+    for (const item of state.observed) {
+      const flight=item.flight;
+      const hex=String(item.icao||item.hex||"").toLowerCase();
+      if (!flight || !/^[0-9a-f]{6}$/.test(hex)) continue;
+      const key=[flight.flightNumber,flight.origin,flight.destination,flight.date,hex].join("|");
+      if (!groups.has(key)) groups.set(key,{flight,hex,records:[],departure:false,arrival:false});
+      const group=groups.get(key);
+      group[item.checkpoint]=true;
+      group.records.push(item);
+    }
+    const bothEnds=[...groups.values()].filter(g=>g.departure&&g.arrival);
+    const oneEnd=[...groups.values()].filter(g=>!(g.departure&&g.arrival)&&["B738","B38M","B737"].includes(String(g.records[0]?.t||"").toUpperCase()));
+    const ordered=[...bothEnds,...oneEnd].sort((a,b)=>(a.departure&&a.arrival?0:1)-(b.departure&&b.arrival?0:1));
+    return ordered.slice(0,6).map(g=>{
+      const first=g.records[0]||{};
+      const times=g.records.map(r=>{
+        const value=r.closest_time;
+        const ms=typeof value==="number"?value*1000:Date.parse(value);
+        return Number.isFinite(ms)?new Date(ms).toISOString().replace("T"," ").slice(0,16)+" UTC":"time unavailable";
+      });
+      const trace=g.records.find(r=>r.dailyTrace)?.dailyTrace;
+      const points=Array.isArray(trace?.trace)?trace.trace.length:0;
+      return {flight:g.flight,aircraft:{hex:g.hex,r:first.r||null,t:first.t||null,flight:Array.isArray(first.callsigns)?first.callsigns[0]||"":String(first.callsigns||""),historicalOnly:true,observedBothEnds:!!(g.departure&&g.arrival),observedCheckpoints:[g.departure?"departure airport":"",g.arrival?"arrival airport":""].filter(Boolean).join(" + "),observedTimes:times,historicalPositions:points,crossTrack:0,score:g.departure&&g.arrival?100:40}};
+    });
   }
   const EARTH_NM = 3440.065;
   const RAD = Math.PI/180;
@@ -460,12 +487,15 @@
     el.innerHTML=items.map((item,i)=>{
       const f=item.flight, ac=item.aircraft;
       const dateLabel=new Intl.DateTimeFormat("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(`${f.date}T12:00:00Z`));
-      const confidence="POSSIBLE";
+      const historical=!!ac.historicalOnly;
+      const confidence=historical?(ac.observedBothEnds?"OBSERVED BOTH ENDS":"PARTIAL OBSERVATION"):"POSSIBLE";
       const confidenceClass="none";
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
-      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} · NOT VERIFIED</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · ADS-B operator label matches Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small><button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button></div>`;
+      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · ADS-B operator label matches Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}`;
+      const action=historical?"":`<button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button>`;
+      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} · NOT VERIFIED</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · ${evidence}${historical?" · NOT AIRLINE-CONFIRMED":""}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small>${action}</div>`;
     }).join("");
     el.querySelectorAll("[data-pick]").forEach(button=>button.addEventListener("click",()=>{
       const item=items[Number(button.dataset.pick)]; if(!item)return;
@@ -506,10 +536,11 @@
       responses.forEach((r,i)=>{ if(r.status==="fulfilled")state.flights.push(...r.value); else scheduleErrors.push(`${routes[i].join("-")}: ${r.reason?.message||"schedule unavailable"}`); });
       state.flights.sort((a,b)=>a.departure-b.departure); render();
       try { await loadObserved(date); } catch(e) { renderObserved("FlyItalyADSB overflight checks unavailable: "+(e.message||"API error")); }
+      const observedCandidates=observedAircraftCandidates();
       const deviceNow=new Date();
       const today=[deviceNow.getFullYear(),String(deviceNow.getMonth()+1).padStart(2,"0"),String(deviceNow.getDate()).padStart(2,"0")].join("-");
       if (date !== today) {
-        renderCandidates([],"Live ADS-B matching is available only for today's date. The scheduled sectors for your selected date are shown below.");
+        renderCandidates(observedCandidates,observedCandidates.length?"Historical FlyItalyADSB observations are listed here. The same ICAO at both airports is strong evidence, but not airline confirmation.":"No historical aircraft was linked to both airport windows. Live position matching is available only for today.");
         $("connection").textContent="Timetable loaded · live aircraft matching is for today only";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
         if (scheduleErrors.length) showError(scheduleErrors.join("\n"));
@@ -518,7 +549,7 @@
       const nowMs=Date.now();
       const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-120*60000&&nowMs<=f.arrival.getTime()+240*60000);
       if (!searchFlights.length) {
-        renderCandidates([],"No scheduled flight falls within the live tracking window. Check the duty sectors below: the timetable may be missing the flight or its scheduled times may differ.");
+        renderCandidates(observedCandidates,observedCandidates.length?"FlyItalyADSB airport observations are listed here. Same ICAO at both ends is strong evidence, not airline confirmation.":"No scheduled flight falls within the live tracking window, and no aircraft was observed at both airport windows.");
         $("connection").textContent="Timetable loaded · no flight inside live window";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
         if (scheduleErrors.length) showError(scheduleErrors.join("\n"));
@@ -530,14 +561,15 @@
       found.forEach((r,i)=>{ if(r.status==="fulfilled")all.push(...r.value.map(ac=>({flight:searchFlights[i],aircraft:ac}))); else adsbErrors.push(`${searchFlights[i].origin}-${searchFlights[i].destination}: ${r.reason?.message||"ADS-B unavailable"}`); });
       const unique=new Map();
       for (const item of all) { const key=String(item.aircraft.hex).toLowerCase(); const old=unique.get(key); if(!old||item.aircraft.score>old.aircraft.score)unique.set(key,item); }
-      const final=[...unique.values()].sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,3);
+      const liveCandidates=[...unique.values()].sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,3);
+      const final=[...observedCandidates,...liveCandidates].slice(0,6);
       state.candidates=final;
-      renderCandidates(final,adsbErrors.length&&!final.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft match found. ADS-B coverage, aircraft position and timing can affect results.");
+      renderCandidates(final,final.length?"Historical airport observations and live positions are listed separately. None is an airline-confirmed assignment.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No aircraft was found in the scheduled airport windows or current route positions.");
       try { await refreshSelected(); } catch(e) { console.warn("Could not refresh saved aircraft",e.message); }
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
-      if (final.length) $("connection").textContent=`${final.length} possible ADS-B aircraft · none is automatically confirmed`;
-      else $("connection").textContent="No plausible aircraft found in the live ADS-B data";
+      if (final.length) $("connection").textContent=`${final.length} aircraft observations · none is automatically confirmed`;
+      else $("connection").textContent="No matching aircraft observation found";
       if (scheduleErrors.length||adsbErrors.length) showError([...scheduleErrors,...adsbErrors].join("\n"));
     } catch(e) {
       showError(e.message||"Unable to load flight data."); $("connection").textContent="Unable to load flight data";
