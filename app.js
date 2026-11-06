@@ -297,7 +297,7 @@
     const distance=hav(origin,destination);
     const fractions = distance < 180 ? [0.08,0.35,0.65,0.92] : [0.04,0.22,0.40,0.60,0.78,0.96];
     const points=fractions.map(f=>interpolate(origin,destination,f));
-    const radius=Math.min(180,Math.max(90,Math.round(distance/7+45)));
+    const radius=Math.min(240,Math.max(130,Math.round(distance/6+65)));
     const results=await Promise.allSettled(points.map(p=>aircraftNear(p,radius)));
     const map=new Map();
     const failures=[];
