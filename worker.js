@@ -181,10 +181,10 @@ export default {
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
     if(!env.AIRCRAFT_POOL)return cors(JSON.stringify({error:"AIRCRAFT_POOL KV binding is not configured"}),503,{"Content-Type":"application/json"});
     let pool=await env.AIRCRAFT_POOL.get(poolKey(date),"json");
-    // On first request of the current UTC day, bootstrap the pool from the latest six hours.
-    // A short KV lock prevents ordinary concurrent page loads from duplicating the upstream query.
+    // refresh=1 forces a fresh six-hour query for the current UTC day, even if an empty pool exists.
     const today=new Date().toISOString().slice(0,10);
-    if(!pool&&date===today){
+    const forceRefresh=u.searchParams.get("refresh")==="1";
+    if((!pool||forceRefresh)&&date===today){
      const lockKey=poolKey(date)+":bootstrap-lock";
      const locked=await env.AIRCRAFT_POOL.get(lockKey);
      if(!locked){
@@ -192,7 +192,7 @@ export default {
       try{
        if(!env.FLYITALYADSB_API_KEY)throw new Error("FLYITALYADSB_API_KEY secret is missing");
        const to=new Date(Date.now()-60000),from=new Date(to.getTime()-6*3600000);
-       await updatePool(env,date,from,to,"on-demand-bootstrap");
+       await updatePool(env,date,from,to,forceRefresh?"manual-refresh":"on-demand-bootstrap");
        pool=await env.AIRCRAFT_POOL.get(poolKey(date),"json");
       }catch(e){
        return cors(JSON.stringify({error:"Initial pool collection failed",detail:String(e?.message||e)}),502,{"Content-Type":"application/json","Cache-Control":"no-store"});
