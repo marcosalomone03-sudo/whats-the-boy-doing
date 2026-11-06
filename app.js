@@ -128,13 +128,14 @@
     const out = [];
     const timePart = value => {
       if (value === null || value === undefined) return "";
-      const match = String(value).match(/(?:T|^| )(\\d{2}:\\d{2})/);
+      const text = String(value);
+      const match = text.match(/(?:T|^| )(\d{2}:\d{2})/);
       return match ? match[1] : "";
     };
     const flightNo = (raw,carrier) => {
-      const value = String(raw || "").replace(/\\s+/g,"").toUpperCase();
+      const value = String(raw || "").replace(/\s+/g,"").toUpperCase();
       if (!value) return "";
-      return /^[A-Z]{2,3}\\d/.test(value) ? value : `${String(carrier || "FR").toUpperCase()}${value}`;
+      return /^[A-Z]{2,3}\d/.test(value) ? value : `${String(carrier || "FR").toUpperCase()}${value}`;
     };
     if (Array.isArray(data?.days)) {
       for (const day of data.days) {
