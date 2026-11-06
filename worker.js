@@ -132,13 +132,29 @@ function poolHex(r){return String(r?.icao||r?.hex||r?.hex_id||r?.icao24||"").toL
 function poolType(r){return String(r?.t||r?.type||r?.aircraft_type||r?.icao_type||"").toUpperCase();}
 function poolTime(r){const v=r?.closest_time??r?.timestamp??r?.time??r?.seen;if(typeof v==="number")return new Date(v<1e12?v*1000:v).toISOString();const d=new Date(v);return Number.isFinite(d.getTime())?d.toISOString():null;}
 async function poolFetch(env,from,to){
- const url="https://api.flyitalyadsb.com/v2/overflights?lat=49.4987&lon=11.0780&dist=10&from="+encodeURIComponent(from.toISOString())+"&to="+encodeURIComponent(to.toISOString())+"&limit=500";
- const r=await fetch(url,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/15.0"}});
- const body=await r.text();let payload;
- try{payload=JSON.parse(body);}catch{throw new Error("FlyItalyADSB returned non-JSON HTTP "+r.status+": "+body.slice(0,180));}
- if(!r.ok)throw new Error("FlyItalyADSB HTTP "+r.status+" "+body.slice(0,180));
- const rows=poolRows(payload);
- return {rows,meta:{httpStatus:r.status,contentType:r.headers.get("Content-Type")||"",plan:r.headers.get("X-FIA-Plan")||null,usedMonth:r.headers.get("X-FIA-Used-Month")||null,topLevelKeys:payload&&typeof payload==="object"?Object.keys(payload).slice(0,30):[],upstreamCount:payload?.count??null,candidates:payload?.candidates??null,coverage:payload?.coverage??null,completeUntil:payload?.complete_until??null,truncated:payload?.truncated??null,returnedArrayKey:Array.isArray(payload?.overflights)?"overflights":Array.isArray(payload?.aircraft)?"aircraft":Array.isArray(payload?.results)?"results":Array.isArray(payload?.items)?"items":Array.isArray(payload?.ac)?"ac":Array.isArray(payload)?"root-array":"none",requestedFrom:from.toISOString(),requestedTo:to.toISOString()}};
+ const base="https://api.flyitalyadsb.com/v2/overflights?lat=49.4987&lon=11.0780&dist=10&to="+encodeURIComponent(to.toISOString())+"&limit=500";
+ let cursor=new Date(from),allRows=[],pages=[],lastMeta=null,truncated=false;
+ // FlyItalyADSB can truncate a six-hour response before the requested end.
+ // Continue at complete_until until the requested interval is covered.
+ for(let page=0;page<12;page++){
+  const pageFrom=new Date(cursor);
+  const url=base+"&from="+encodeURIComponent(pageFrom.toISOString());
+  const r=await fetch(url,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/15.0"}});
+  const body=await r.text();let payload;
+  try{payload=JSON.parse(body);}catch{throw new Error("FlyItalyADSB returned non-JSON HTTP "+r.status+": "+body.slice(0,180));}
+  if(!r.ok)throw new Error("FlyItalyADSB HTTP "+r.status+" "+body.slice(0,180));
+  const rows=poolRows(payload);
+  allRows.push(...rows);
+  lastMeta={httpStatus:r.status,contentType:r.headers.get("Content-Type")||"",plan:r.headers.get("X-FIA-Plan")||null,usedMonth:r.headers.get("X-FIA-Used-Month")||null,topLevelKeys:payload&&typeof payload==="object"?Object.keys(payload).slice(0,30):[],upstreamCount:payload?.count??rows.length,candidates:payload?.candidates??null,coverage:payload?.coverage??null,completeUntil:payload?.complete_until??null,truncated:payload?.truncated??null,returnedArrayKey:Array.isArray(payload?.overflights)?"overflights":Array.isArray(payload?.aircraft)?"aircraft":Array.isArray(payload?.results)?"results":Array.isArray(payload?.items)?"items":Array.isArray(payload?.ac)?"ac":Array.isArray(payload)?"root-array":"none",requestedFrom:pageFrom.toISOString(),requestedTo:to.toISOString()};
+  pages.push({from:pageFrom.toISOString(),completeUntil:lastMeta.completeUntil,returned:rows.length,truncated:!!lastMeta.truncated});
+  truncated=!!lastMeta.truncated;
+  if(!truncated)break;
+  const next=lastMeta.completeUntil?new Date(lastMeta.completeUntil):null;
+  if(!next||!Number.isFinite(next.getTime())||next<=cursor||next>=to)break;
+  cursor=next;
+ }
+ const uniqueRows=[...new Map(allRows.map(row=>[poolHex(row)+"|"+String(row?.closest_time??row?.timestamp??row?.time??row?.seen??""),row])).values()];
+ return {rows:uniqueRows,meta:{...(lastMeta||{}),upstreamCount:allRows.length,candidates:lastMeta?.candidates??null,truncated,pages,requestedFrom:from.toISOString(),requestedTo:to.toISOString(),pageCount:pages.length,rawRows:allRows.length,deduplicatedRows:uniqueRows.length}};
 }
 async function updatePool(env,day,from,to,mode){
  if(!env.AIRCRAFT_POOL||!env.FLYITALYADSB_API_KEY)throw new Error("AIRCRAFT_POOL KV or FlyItalyADSB key missing");
