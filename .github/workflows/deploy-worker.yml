@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "worker.js"
+      - "app.js"
       - "wrangler.toml"
       - ".github/workflows/deploy-worker.yml"
   workflow_dispatch:
