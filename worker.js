@@ -77,7 +77,16 @@ function normalizeBoardRows(payload,origin,destination,date,direction){
   if(!from&&!to)return null;
   const boardTime=boardClock(row);
   if(!boardTime)return null;
-  return {flightNumber:number,carrierCode:number.match(/^(FR|RK|RR|OE)/)[1],boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,source:"Nuremberg Airport"};
+  const actualRaw=pick(flight,["actualTime","actualLocalTime","actualDateTime","actualDepartureTime","actualArrivalTime","realTime","realDateTime"])||pick(row,["actualTime","actualLocalTime","actualDateTime","actualDepartureTime","actualArrivalTime","realTime","realDateTime"]);
+  const estimatedRaw=pick(flight,["estimatedTime","estimatedLocalTime","estimatedDateTime","estimatedDepartureTime","estimatedArrivalTime"])||pick(row,["estimatedTime","estimatedLocalTime","estimatedDateTime","estimatedDepartureTime","estimatedArrivalTime"]);
+  const scheduledRaw=pick(flight,["scheduledTime","scheduledLocalTime","scheduledDateTime","scheduledDepartureTime","scheduledArrivalTime"])||pick(row,["scheduledTime","scheduledLocalTime","scheduledDateTime","scheduledDepartureTime","scheduledArrivalTime"])||boardTime;
+  const status=pick(flight,["status","flightStatus","statusText","flightState","state","statusDescription"])||pick(row,["status","flightStatus","statusText","flightState","state","statusDescription"]);
+  const registration=pick(flight,["registration","aircraftRegistration","tailNumber"])||pick(row,["registration","aircraftRegistration","tailNumber"]);
+  const aircraftType=pick(flight,["aircraftType","aircraft","equipment","type"])||pick(row,["aircraftType","aircraft","equipment","type"]);
+  return {flightNumber:number,carrierCode:number.match(/^(FR|RK|RR|OE)/)[1],boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,
+   boardScheduledTime:boardClock(scheduledRaw)||boardTime,boardActualTime:boardClock(actualRaw),boardEstimatedTime:boardClock(estimatedRaw),
+   boardStatus:String(status||""),boardRegistration:String(registration||""),boardAircraftType:String(aircraftType?.code||aircraftType?.name||aircraftType||""),
+   boardRaw:row,source:"Nuremberg Airport"};
  }).filter(Boolean);
 }
 async function nurembergFlights(origin,destination,date){
