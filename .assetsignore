@@ -1,0 +1,9 @@
+*
+!index.html
+!app.js
+!config.js
+!airports.json
+!manifest.webmanifest
+!sw.js
+!icon-192.png
+!icon-512.png
