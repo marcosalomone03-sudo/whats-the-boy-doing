@@ -1,4 +1,4 @@
-name: Probe official NUE board API
+name: Probe official NUE board authentication
 
 on:
   push:
@@ -15,19 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Query the exact API used by the official board
+      - name: Inspect official board API auth and page data
         run: |
           node --input-type=module <<'NODE'
-          const base="https://airportnue-service.justrelate.io/production/api/flight-status";
-          const h={"User-Agent":"Mozilla/5.0","Accept":"application/json","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"};
-          for(const path of [
-            "/departures?lang=en&airportIata=NUE&flightNumber=&date=2026-11-06&hourMin=&hourMax=",
-            "/arrivals?lang=en&airportIata=NUE&flightNumber=&date=2026-11-06&hourMin=&hourMax=",
-            "/filter-options?lang=en",
-            "/departures?lang=en&airportIata=NUE&flightNumber=&date=2026-11-07&hourMin=&hourMax=",
-            "/arrivals?lang=en&airportIata=NUE&flightNumber=&date=2026-11-07&hourMin=&hourMax="
-          ]){
-            const url=base+path;
-            try{const r=await fetch(url,{headers:h,signal:AbortSignal.timeout(20000)});const t=await r.text();console.log("\nURL",url,"HTTP",r.status,"TYPE",r.headers.get("content-type"),"BYTES",t.length,"BODY",t.slice(0,9000));}catch(e){console.log("ERROR",url,String(e));}
+          const h={"User-Agent":"Mozilla/5.0","Accept":"application/json,text/html,*/*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status"};
+          const page=await fetch("https://www.airport-nuernberg.de/en/flight-status",{headers:h});const html=await page.text();
+          for(const term of ["W45116","arrivals-and-departures","scheduledTime","flightNumber","apiKey","x-api-key","Authorization"])console.log("HTML",term,html.indexOf(term),html.slice(Math.max(0,html.indexOf(term)-250),Math.max(0,html.indexOf(term))+500));
+          const u="https://www.airport-nuernberg.de/assets/index.ad3000b20012b9ee.js";
+          const js=await (await fetch(u,{headers:h})).text();
+          for(const term of ["publicApiHost","defaultOptions","Missing Authentication Token","api-key","x-api-key","Authorization","filter-options","flightNumber=&date="]){
+            let p=-1,n=0;while((p=js.indexOf(term,p+1))>=0&&n++<5)console.log("\nJS",term,js.slice(Math.max(0,p-700),Math.min(js.length,p+1300)));
           }
           NODE
