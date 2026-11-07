@@ -536,23 +536,41 @@
     $("sectorCount").textContent=flights.length+" SECTORS";
     const historyEl=$("dailyHistory");
     if(historyEl){
+      const plain=value=>{
+        if(value===null||value===undefined)return "";
+        if(typeof value==="string"||typeof value==="number")return String(value);
+        if(Array.isArray(value))return value.map(plain).filter(Boolean).join(" ");
+        if(typeof value==="object"){
+          for(const key of ["label","text","description","name","code","iataCode","icaoCode","shortName","model","value","type"])
+            if(value[key]!==undefined&&value[key]!==null){const result=plain(value[key]);if(result)return result;}
+        }
+        return "";
+      };
+      const clock=value=>{
+        const raw=plain(value);
+        const match=raw.match(/(?:T|^|\\s)(\\d{1,2}:\\d{2})/);
+        return match?match[1].padStart(5,"0"):"";
+      };
       const history=[...flights].sort((a,b)=>a.departure-b.departure).map(f=>{
         const isArrival=f.boardDirection==="arrival";
-        const actual=String(f.boardActualTime||"").slice(0,5);
-        const scheduled=String(f.boardScheduledTime||(isArrival?f.arrivalLocal:f.departureLocal)||"").slice(0,5);
-        const status=String(f.boardStatus||"").trim();
-        const eventTime=actual||f.boardEstimatedTime||"";
+        const actual=clock(f.boardActualTime);
+        const estimated=clock(f.boardEstimatedTime);
+        const scheduled=clock(f.boardScheduledTime)||clock(isArrival?f.arrivalLocal:f.departureLocal);
+        const rawStatus=plain(f.boardStatus).trim().toUpperCase().replace(/[_-]+/g," ");
+        const eventTime=actual||estimated||scheduled;
         let deltaText="";
-        if(actual&&/^\d{2}:\d{2}$/.test(actual)&&/^\d{2}:\d{2}$/.test(scheduled)){
+        if(actual&&scheduled){
           const toMin=x=>Number(x.slice(0,2))*60+Number(x.slice(3,5));
           let delta=toMin(actual)-toMin(scheduled);
           if(delta>720)delta-=1440;if(delta< -720)delta+=1440;
           deltaText=delta===0?"ON TIME":Math.abs(delta)+" MIN "+(delta<0?"EARLY":"LATE");
         }
-        const inferred=status?status.toUpperCase():(actual?(isArrival?"LANDED":"DEPARTED"):"SCHEDULED · NO ACTUAL TIME");
+        const statusMap={"ON TIME":"ON TIME · NO ACTUAL TIME","STARTED":"STARTED · NO ACTUAL TIME","LANDED":"LANDED","ARRIVED":"LANDED","DEPARTED":"DEPARTED","CANCELLED":"CANCELLED","CANCELED":"CANCELLED","DIVERTED":"DIVERTED"};
+        const inferred=actual?(isArrival?"LANDED":"DEPARTED"):(statusMap[rawStatus]||rawStatus||"SCHEDULED · NO ACTUAL TIME");
         const badgeClass=/cancel|divert|delay|late/i.test(inferred)?"ground":actual?"air":"none";
-        const eventLabel=actual?(isArrival?"ACTUAL ARRIVAL":"ACTUAL DEPARTURE"):f.boardEstimatedTime?(isArrival?"EST. ARRIVAL":"EST. DEPARTURE"):"SCHEDULED";
-        const meta=[eventLabel,eventTime||scheduled,deltaText,f.boardRegistration,f.boardAircraftType].filter(Boolean).join(" · ");
+        const eventLabel=actual?(isArrival?"ACTUAL ARRIVAL":"ACTUAL DEPARTURE"):estimated?(isArrival?"EST. ARRIVAL":"EST. DEPARTURE"):"SCHEDULED";
+        const registration=plain(f.boardRegistration),aircraftType=plain(f.boardAircraftType);
+        const meta=[eventLabel,eventTime,deltaText,registration,aircraftType].filter(Boolean).join(" · ");
         return `<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(meta)} · ${esc(f.source||"Nuremberg Airport")}</small></div><span class="status ${badgeClass}">${esc(inferred)}</span></div>`;
       });
       historyEl.innerHTML=history.length?history.join(""):`<div class="empty">No flight records returned for this route and date.</div>`;
