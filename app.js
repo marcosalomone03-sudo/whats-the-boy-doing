@@ -486,20 +486,31 @@
       candidates.push({...ac,score,crossTrack:geo.crossTrack,alongTrack:geo.alongTrack,expectedFraction,onGround,seenPos,operatorMatch:false,matchStatus:"IDENTITY CHECK PENDING"});
     }
     candidates.sort((a,b)=>b.score-a.score);
-    // ADS-B itself has no airline field. Enrich only the strongest type/route candidates
-    // from an aircraft registry, then keep only confirmed Ryanair Group ownership/operator flags.
-    const checked=await Promise.all(candidates.slice(0,10).map(async ac=>{
+    // ADS-B itself does not reliably identify the operator. Do not discard a live
+    // B738/B38M merely because public registry enrichment is missing: EI/9H/SP
+    // registrations are a shortlist signal, not proof of Ryanair Group ownership.
+    const checked=await Promise.all(candidates.slice(0,20).map(async ac=>{
+      const poolMatch=!!state.pool?.[String(ac.hex).toLowerCase()];
       try {
         const identity=await aircraftIdentity(ac.hex);
         const registration=ac.r||identity.registration||null;
         const match=ryanairGroupIdentity(identity,registration);
-        return {...ac,operatorMatch:match.ok,registrationPrefixMatch:match.prefixMatch,poolMatch:!!state.pool?.[String(ac.hex).toLowerCase()],operatorName:match.owner||match.flag||"Unknown",identitySource:identity.source||"Aircraft registry",
-          r:registration,t:ac.t||identity.aircraftType||null};
+        const knownOtherOwner=!!(match.owner||match.flag) && !match.ownerMatch && !match.flagMatch;
+        const possibleOnly=match.prefixMatch && !match.ok && !knownOtherOwner;
+        return {...ac,operatorMatch:match.ok,possibleOnly,registrationPrefixMatch:match.prefixMatch,
+          poolMatch,operatorName:match.owner||match.flag||(possibleOnly?"Ryanair Group registration prefix only":"Unknown"),
+          identitySource:identity.source||"Aircraft registry",r:registration,t:ac.t||identity.aircraftType||null};
       } catch(error) {
-        return {...ac,operatorMatch:false,operatorName:"Unverified",identityError:error.message};
+        const registration=ac.r||null;
+        const prefixMatch=/^(EI|9H|SP)/.test(String(registration||"").toUpperCase().replace(/[^A-Z0-9]/g,""));
+        return {...ac,operatorMatch:false,possibleOnly:prefixMatch,registrationPrefixMatch:prefixMatch,
+          poolMatch,operatorName:prefixMatch?"Ryanair Group registration prefix only":"Unverified",
+          identityError:error.message,r:registration};
       }
     }));
-    return checked.filter(ac=>ac.operatorMatch).sort((x,y)=>(y.poolMatch?1:0)-(x.poolMatch?1:0)||y.score-x.score).slice(0,3);
+    return checked.filter(ac=>ac.operatorMatch||ac.possibleOnly)
+      .sort((x,y)=>(y.operatorMatch?1:0)-(x.operatorMatch?1:0)||(y.poolMatch?1:0)-(x.poolMatch?1:0)||y.score-x.score)
+      .slice(0,6);
   }
 
   function saveSelected(flight,aircraft) {
@@ -589,14 +600,14 @@
       const f=item.flight, ac=item.aircraft;
       const dateLabel=new Intl.DateTimeFormat("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(`${f.date}T12:00:00Z`));
       const historical=!!ac.historicalOnly;
-      const confidence=historical?(ac.observedBothEnds?"OBSERVED BOTH ENDS":"PARTIAL OBSERVATION"):"POSSIBLE";
+      const confidence=historical?(ac.observedBothEnds?"OBSERVED BOTH ENDS":"PARTIAL OBSERVATION"):(ac.operatorMatch?"RYANAIR GROUP REGISTRY MATCH":"POSSIBLE ONLY");
       const confidenceClass="none";
       const type=ac.t||"Type not broadcast";
       const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
       const poolEvidence=ac.poolMatch?" · IN RECENT NUE AREA POOL":" · NOT IN RECENT NUE AREA POOL";
       const continuity=ac.turnaroundEvidence?" · TURNAROUND CONTINUITY OBSERVED: same HEX at "+esc(ac.turnaroundEvidence.inboundFlight)+" arrival and "+esc(f.flightNumber)+" departure at "+esc(f.origin)+" ("+ac.turnaroundEvidence.gapMinutes+" min between observations)":" · NO VERIFIED TURNAROUND LINK";
-      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · aircraft registry identifies Ryanair Group":""} · SOURCE ${esc(f.source||"Schedule")}`+continuity+poolEvidence;
+      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · aircraft registry identifies Ryanair Group":ac.possibleOnly?" · EI/9H/SP registration prefix only; operator unconfirmed":""} · SOURCE ${esc(f.source||"Schedule")}`+continuity+poolEvidence;
       const action=historical?"":`<button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button>`;
       return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} · NOT VERIFIED</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · OWNER ${esc(ac.operatorName||"Ryanair Group registry match")} · ${evidence}${historical?" · NOT AIRLINE-CONFIRMED":""}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small>${action}</div>`;
     }).join("");
@@ -687,7 +698,7 @@
       }
       const final=[...unique.values()].sort((a,b)=>(b.aircraft.turnaroundEvidence?1:0)-(a.aircraft.turnaroundEvidence?1:0)||b.aircraft.score-a.aircraft.score).slice(0,6);
       state.candidates=final;
-      renderCandidates(final,final.length?"Live ADS-B candidates only. Filtered to B738/B38M and checked against aircraft registry ownership. Position and route fit are not airline confirmation.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft passed both the Ryanair Group operator and B738/B38M filters.");
+      renderCandidates(final,final.length?"Live ADS-B candidates: B738/B38M route matches. Registry-confirmed aircraft are distinguished from EI/9H/SP-prefix possibilities; neither proves assignment to this flight.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft passed both the Ryanair Group operator and B738/B38M filters.");
       // Never silently restore a previously selected aircraft after a fresh search.
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
