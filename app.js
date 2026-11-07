@@ -430,10 +430,10 @@
     // Always inspect the departure area. Once the flight has had time to leave,
     // also inspect the expected live position and nearby route segments.
     const requests=[aircraftNear(origin,40)];
-    if(now>dep+8*60000) requests.push(aircraftNear(expectedPoint,105));
-    if(now>dep+8*60000 && expectedFraction>0.18 && expectedFraction<0.82) {
-      requests.push(aircraftNear(interpolate(origin,destination,Math.max(0,expectedFraction-0.16)),95));
-      requests.push(aircraftNear(interpolate(origin,destination,Math.min(1,expectedFraction+0.16)),95));
+    if(now>dep+8*60000) requests.push(aircraftNear(expectedPoint,250));
+    if(now>dep+8*60000 && expectedFraction>0.12 && expectedFraction<0.88) {
+      requests.push(aircraftNear(interpolate(origin,destination,Math.max(0,expectedFraction-0.16)),250));
+      requests.push(aircraftNear(interpolate(origin,destination,Math.min(1,expectedFraction+0.16)),250));
     }
     const results=await Promise.allSettled(requests);
     const map=new Map(), failures=[];
@@ -456,7 +456,7 @@
       const distanceToOrigin=hav(origin,pos),distanceToDestination=hav(destination,pos);
       const onGround=ac.alt_baro==="ground";
       const seenPos=positionAge(ac),track=numeric(ac.track);
-      if(seenPos>30) continue;
+      if(seenPos>60) continue;
       const nearOrigin=distanceToOrigin<=35;
       const nearDestination=distanceToDestination<=25;
       const minutesFromDeparture=(now-dep)/60000;
@@ -467,14 +467,14 @@
         const atDestination=nearDestination&&minutesAfterArrival>=-30&&minutesAfterArrival<=30;
         if(!validGround&&!atDestination) continue;
       } else {
-        if(geo.alongTrack < -25 || geo.alongTrack > geo.distance+30 || geo.crossTrack>85) continue;
-        if(minutesAfterArrival>12&&distanceToDestination>22) continue;
-        if(minutesAfterArrival>30) continue;
+        if(geo.alongTrack < -40 || geo.alongTrack > geo.distance+50 || geo.crossTrack>150) continue;
+        if(minutesAfterArrival>45&&distanceToDestination>55) continue;
+        if(minutesAfterArrival>60) continue;
         const fraction=Math.max(0,Math.min(1,geo.alongTrack/Math.max(1,geo.distance)));
         progressDifference=Math.abs(fraction-expectedFraction);
         headingDifference=track===null?null:angleDiff(track,routeBearing);
-        const nearEndpoint=Math.min(distanceToOrigin,distanceToDestination)<=12;
-        if(!nearEndpoint&&progressDifference>0.38) continue;
+        const nearEndpoint=Math.min(distanceToOrigin,distanceToDestination)<=25;
+        if(!nearEndpoint&&progressDifference>0.55) continue;
         if(!nearEndpoint&&headingDifference!==null&&headingDifference>125) continue;
       }
       const routePenalty=Math.min(40,geo.crossTrack/2);
