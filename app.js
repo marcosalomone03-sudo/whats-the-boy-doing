@@ -698,7 +698,7 @@
       }
       const final=[...unique.values()].sort((a,b)=>(b.aircraft.turnaroundEvidence?1:0)-(a.aircraft.turnaroundEvidence?1:0)||b.aircraft.score-a.aircraft.score).slice(0,6);
       state.candidates=final;
-      renderCandidates(final,final.length?"Live ADS-B candidates: B738/B38M route matches. Registry-confirmed aircraft are distinguished from EI/9H/SP-prefix possibilities; neither proves assignment to this flight.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live aircraft passed both the Ryanair Group operator and B738/B38M filters.");
+      renderCandidates(final,final.length?"Live ADS-B candidates: B738/B38M route matches. Registry-confirmed aircraft are distinguished from EI/9H/SP-prefix possibilities; neither proves assignment to this flight.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live B738/B38M aircraft matched the route and position checks. This does not prove that the flight is not airborne.");
       // Never silently restore a previously selected aircraft after a fresh search.
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
