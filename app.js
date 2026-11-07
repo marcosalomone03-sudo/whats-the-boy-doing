@@ -548,7 +548,7 @@
       };
       const clock=value=>{
         const raw=plain(value);
-        const match=raw.match(/(?:T|^|\\s)(\\d{1,2}:\\d{2})/);
+        const match=raw.match(/(?:T|^|\s)(\d{1,2}:\d{2})/);
         return match?match[1].padStart(5,"0"):"";
       };
       const history=[...flights].sort((a,b)=>a.departure-b.departure).map(f=>{
@@ -621,7 +621,7 @@
   async function run() {
     showError("");
     if (!WORKER) { showError("Worker URL not configured. Check config.js."); return; }
-    const route=$("route").value.trim().toUpperCase().replace(/\\s+/g,"");
+    const route=$("route").value.trim().toUpperCase().replace(/\s+/g,"");
     const date=$("flightDate").value;
     if (!ROUTE_RE.test(route)) { showError("Enter one airport code (BUD) or two (BUD-ALC)."); return; }
     if (!date) { showError("Choose a duty date."); return; }
