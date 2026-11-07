@@ -5,7 +5,14 @@
  */
 function dateCompact(date){return date.replace(/-/g,"");}
 function daySchedule(date,flights,source,googleSearchUrl,diagnostics){return {source,googleSearchUrl,diagnostics,days:[{day:Number(date.slice(-2)),flights}]};}
-function pick(obj,keys){for(const k of keys){const v=obj?.[k];if(v!==undefined&&v!==null&&String(v).trim()!=="")return v;}return "";}
+function pick(obj,keys){for(const k of keys){const v=obj?.[k];if(v!==undefined&&v!==null&&(typeof v==="object"||String(v).trim()!==""))return v;}return "";}
+function boardText(value,keys=["label","text","description","name","code","iataCode","icaoCode","shortName","model","value","type"]){
+ if(value===null||value===undefined)return "";
+ if(typeof value==="string"||typeof value==="number")return String(value).trim();
+ if(Array.isArray(value))return value.map(v=>boardText(v,keys)).filter(Boolean).join(" ");
+ if(typeof value==="object"){for(const key of keys){if(value[key]!==undefined&&value[key]!==null){const text=boardText(value[key],keys);if(text)return text;}}}
+ return "";
+}
 function time24(value){
  const s=String(value||"").trim();
  let m=s.match(/(?:^|\D)([01]?\d|2[0-3]):([0-5]\d)(?:\s*([ap]\.?m\.?))?/i);
@@ -82,12 +89,12 @@ function normalizeBoardRows(payload,origin,destination,date,direction){
   const estimatedRaw=pick(flight,["estimatedTime","estimatedLocalTime","estimatedDateTime","estimatedDepartureTime","estimatedArrivalTime"])||pick(row,["estimatedTime","estimatedLocalTime","estimatedDateTime","estimatedDepartureTime","estimatedArrivalTime"])||pick(eventObject,["estimatedTime","estimated","timeEstimated"]);
   const scheduledRaw=pick(flight,["scheduledTime","scheduledLocalTime","scheduledDateTime","scheduledDepartureTime","scheduledArrivalTime"])||pick(row,["scheduledTime","scheduledLocalTime","scheduledDateTime","scheduledDepartureTime","scheduledArrivalTime"])||pick(eventObject,["scheduledTime","scheduled","timeScheduled"])||boardTime;
   const statusRaw=pick(flight,["status","flightStatus","statusText","flightState","state","statusDescription"])||pick(row,["status","flightStatus","statusText","flightState","state","statusDescription"])||pick(eventObject,["status","statusText","state","description"]);
-  const status=typeof statusRaw==="object"?pick(statusRaw,["label","text","description","name","code","value"]):statusRaw;
-  const registration=pick(flight,["registration","aircraftRegistration","tailNumber"])||pick(row,["registration","aircraftRegistration","tailNumber"]);
-  const aircraftType=pick(flight,["aircraftType","aircraft","equipment","type"])||pick(row,["aircraftType","aircraft","equipment","type"]);
+  const status=boardText(statusRaw);
+  const registration=boardText(pick(flight,["registration","aircraftRegistration","tailNumber"])||pick(row,["registration","aircraftRegistration","tailNumber"]));
+  const aircraftType=boardText(pick(flight,["aircraftType","aircraft","equipment","type"])||pick(row,["aircraftType","aircraft","equipment","type"]));
   return {flightNumber:number,carrierCode:number.match(/^(FR|RK|RR|OE)/)[1],boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,
    boardScheduledTime:boardClock(scheduledRaw)||boardTime,boardActualTime:boardClock(actualRaw),boardEstimatedTime:boardClock(estimatedRaw),
-   boardStatus:String(status||""),boardRegistration:String(registration||""),boardAircraftType:String(aircraftType?.code||aircraftType?.name||aircraftType||""),
+   boardStatus:status,boardRegistration:registration,boardAircraftType:aircraftType,
    boardRaw:row,source:"Nuremberg Airport"};
  }).filter(Boolean);
 }
