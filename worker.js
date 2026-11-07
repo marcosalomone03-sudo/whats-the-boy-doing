@@ -56,7 +56,7 @@ function boardDate(row){
 function boardClock(row){
  const value=pick(row,["scheduledTime","scheduledDateTime","scheduledLocalTime","scheduledArrivalTime","scheduledDepartureTime","arrivalTime","departureTime","scheduleTime","time","estimatedTime","actualTime"]);
  if(value==="")return "";
- if(typeof value==="object")return time24(pick(value,["dateTime","time","local","value"]));
+ if(typeof value==="object")return time24(boardText(value,["dateTime","time","local","value","actualTime","estimatedTime","scheduledTime","timestamp"]));
  const raw=String(value).trim();
  if(/^\d{1,2}:\d{2}/.test(raw))return time24(raw);
  const parsed=new Date(raw);
