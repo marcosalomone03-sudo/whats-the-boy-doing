@@ -492,7 +492,7 @@
   function renderInboundAircraft() {
     const item=state.inboundAircraft;
     if(!item)return "";
-    return '<div class="inbound-card"><div class="notice inbound-heading">THE AIRCRAFT ASSIGNED TO YOUR UPCOMING FLIGHT IS CURRENTLY OPERATING THIS INBOUND SECTOR</div>'+renderAircraft(item.flight,item.aircraft)+'<div class="notice">This is the aircraft’s current inbound flight, not your selected outbound flight. Its assignment is based on the NUE airport board registration and is not airline-confirmed.</div></div>';
+    return '<div class="inbound-card"><div class="notice inbound-heading">THE AIRCRAFT ASSIGNED TO YOUR UPCOMING FLIGHT IS CURRENTLY OPERATING THIS INBOUND SECTOR</div>'+renderAircraft(item.flight,item.aircraft,true)+'<div class="notice">This is the aircraft’s current inbound flight, not your selected outbound flight. Its assignment is based on the NUE airport board registration and is not airline-confirmed.</div></div>';
   }
   async function identifyFlightByRegistration(flight,registrationCache=new Map()) {
     const row=boardRowForFlight(flight);
@@ -777,7 +777,7 @@
     if(altitude!==null&&altitude>=20000&&(verticalRate===null||Math.abs(verticalRate)<700))return {icon:"✈️",label:"CRUISE",className:"air"};
     return {icon:"✈️",label:"AIRBORNE",className:"air"};
   }
-  function renderAircraft(flight,ac) {
+  function renderAircraft(flight,ac,isInbound=false) {
     const onGround=ac.alt_baro==="ground";
     const altitude=numeric(ac.alt_baro), speed=numeric(ac.gs), lat=numeric(ac.lat), lon=numeric(ac.lon);
     const destination=airport(flight.destination);
@@ -795,9 +795,9 @@
       eta=new Date(Date.now()+minutes*60000);
       etaLabel=fmt(eta,destination.tz);
       const difference=Math.round((eta-flight.arrival)/60000);
-      if(Math.abs(difference)<=5)punctualityLabel="THE BOY IS ON TIME";
-      else if(difference<0)punctualityLabel="THE BOY IS "+minuteWords(Math.abs(difference))+" EARLY";
-      else {punctualityLabel="THE BOY IS "+minuteWords(difference)+" LATE";punctualityClass="late";}
+      if(Math.abs(difference)<=5)punctualityLabel=isInbound?"ON TIME":"THE BOY IS ON TIME";
+      else if(difference<0)punctualityLabel=(isInbound?"":"THE BOY IS ")+minuteWords(Math.abs(difference))+" EARLY";
+      else {punctualityLabel=(isInbound?"":"THE BOY IS ")+minuteWords(difference)+" LATE";punctualityClass="late";}
     }
     return `<div class="flighttop"><div><div style="display:flex;align-items:center;gap:9px"><span style="font-size:30px;line-height:1" aria-label="${esc(phase.label)}">${phase.icon}</span><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="muted" style="font-weight:700;letter-spacing:.08em">${esc(phase.label)}</div></div></div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><div class="status-stack"><span class="status ${statusClass}">${status}</span>${punctualityLabel?`<span class="status ${punctualityClass}">${esc(punctualityLabel)}</span>`:""}</div></div><div class="stats">
         <div class="stat"><small>Call sign · ADS-B</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
