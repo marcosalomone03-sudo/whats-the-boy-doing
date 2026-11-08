@@ -1065,6 +1065,7 @@
       }
     }
     for(const rawFlight of observed){
+      let inferredThisRecordFromSchedule=false;
       let origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
       let from=rawFlight.from?{...rawFlight.from,iata:origin}:null;
       let to=rawFlight.to?{...rawFlight.to,iata:destination}:null;
@@ -1118,6 +1119,7 @@
           origin=inferred.origin;
           destination=inferred.destination;
           inferredFromScheduleCount++;
+          inferredThisRecordFromSchedule=true;
           from={...(from||{}),iata:origin,airport:from?.airport||"",time:from?.time??null};
           to={...(to||{}),iata:destination,airport:to?.airport||"",time:to?.time??null};
         }
@@ -1131,7 +1133,7 @@
       if(origin!=="NUE"&&destination!=="NUE")continue;
       const observedRegistration=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       if(!observedRegistration)continue;
-      if(inferredFromScheduleCount>0&&!eligibleRegistrations.has(observedRegistration))continue;
+      if(inferredThisRecordFromSchedule&&!eligibleRegistrations.has(observedRegistration))continue;
       // When endpoints are incomplete and the route was inferred from a
       // scheduled sector, require an event close to that sector's actual
       // scheduled departure/arrival. A registration alone is not enough:
