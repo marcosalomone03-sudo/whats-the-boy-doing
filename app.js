@@ -457,7 +457,11 @@
       :item.inboundHistory
       ?"The replacement aircraft was last observed close to "+item.destination+"; landing is not confirmed."
       :"The replacement aircraft is assigned to the next sector, but its live ADS-B position or landing time is not available.";
-    const boyText=item.boyLanding
+    const boyText=item.difference!==null
+      ?item.difference===0
+        ?"THE BOY AND THE REPLACEMENT AIRCRAFT ARE LANDING AT ABOUT THE SAME TIME."
+        :"THE BOY IS LANDING "+Math.abs(item.difference)+" MINUTE"+(Math.abs(item.difference)===1?"":"S")+" "+(item.difference>0?"EARLIER":"LATER")+" THAN THE REPLACEMENT AIRCRAFT."
+      :item.boyLanding
       ?"THE BOY LANDED AT "+item.destination+" · "+fmt(item.boyLanding.actual,ap.tz)+" · "+punctualityText(item.boyLanding.delayMinutes)
       :item.boyEta
       ?"THE BOY IS LANDING IN ABOUT "+item.boyEta.minutes+" MINUTES"
