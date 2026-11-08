@@ -798,6 +798,60 @@
     const stamp=new Date(Number(event.time)*1000);
     return new Intl.DateTimeFormat("en-GB",{timeZone:tz,day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(stamp)+" "+(ap?code:"UTC");
   }
+
+  function latestFlightFromTodayTrack(track) {
+    const rows=Array.isArray(track?.trace)?track.trace:[];
+    const base=Number(track?.timestamp);
+    if(!rows.length||!Number.isFinite(base))return null;
+    const airports=Object.entries(AIRPORTS).filter(([,a])=>Number.isFinite(a?.lat)&&Number.isFinite(a?.lon));
+    const rad=x=>x*Math.PI/180;
+    const distanceKm=(lat1,lon1,lat2,lon2)=>{
+      const dLat=rad(lat2-lat1),dLon=rad(lon2-lon1);
+      const x=Math.sin(dLat/2)**2+Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
+      return 6371*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+    };
+    const points=[];
+    for(const row of rows){
+      if(!Array.isArray(row)||row.length<4)continue;
+      const offset=Number(row[0]),lat=Number(row[1]),lon=Number(row[2]),alt=row[3],gs=Number(row[4]);
+      if(!Number.isFinite(offset)||!Number.isFinite(lat)||!Number.isFinite(lon))continue;
+      const onGround=String(alt).toLowerCase()==="ground";
+      const lowAltitude=Number.isFinite(Number(alt))&&Number(alt)>=0&&Number(alt)<=500&&(!Number.isFinite(gs)||gs<=100);
+      if(!onGround&&!lowAltitude)continue;
+      let nearest=null,nearestKm=Infinity;
+      for(const [code,ap] of airports){
+        const km=distanceKm(lat,lon,ap.lat,ap.lon);
+        if(km<nearestKm){nearestKm=km;nearest=code;}
+      }
+      if(nearest&&nearestKm<=4)points.push({airport:nearest,time:base+offset,seen:onGround?"ground":"low"});
+    }
+    points.sort((a,b)=>a.time-b.time);
+    const clusters=[];
+    for(const point of points){
+      const last=clusters[clusters.length-1];
+      if(last&&last.airport===point.airport&&point.time-last.lastTime<=45*60){
+        last.lastTime=point.time;last.last=point;last.count++;
+        if(point.seen==="ground")last.seen="ground";
+      }else clusters.push({airport:point.airport,firstTime:point.time,lastTime:point.time,first:point,last:point,count:1,seen:point.seen});
+    }
+    const distinct=[];
+    for(const cluster of clusters){
+      if(!distinct.length||distinct[distinct.length-1].airport!==cluster.airport)distinct.push(cluster);
+      else distinct[distinct.length-1]=cluster;
+    }
+    if(distinct.length<2)return null;
+    const from=distinct[distinct.length-2],to=distinct[distinct.length-1];
+    if(to.firstTime<=from.lastTime)return null;
+    return {
+      day:new Date(to.lastTime*1000).toISOString().slice(0,10),
+      from:{iata:from.airport,time:from.lastTime,seen:from.seen},
+      to:{iata:to.airport,time:to.firstTime,seen:to.seen},
+      callsign:"",
+      source:"TODAY'S ADS-B TRACK",
+      inferred:true
+    };
+  }
+
   async function loadRegistrationHistories(items) {
     state.registrationHistory=[];
     const unique=new Map();
@@ -808,12 +862,25 @@
       if(key&&!unique.has(key))unique.set(key,registration);
     }
     const targets=[...unique.entries()].slice(0,2);
+    await loadAirportCatalogue();
     const results=await Promise.allSettled(targets.map(([key,registration])=>get("/api/flight-reg?reg="+encodeURIComponent(registration)).then(data=>({key,registration,data}))));
     for(let i=0;i<results.length;i++){
       const result=results[i];
       if(result.status==="fulfilled")state.registrationHistory.push(result.value);
       else state.registrationHistory.push({key:targets[i][0],registration:targets[i][1],error:result.reason?.message||"History lookup failed"});
     }
+    const today=new Date().toISOString().slice(0,10);
+    await Promise.all(state.registrationHistory.map(async item=>{
+      const icao=String(item.data?.icao||"").toLowerCase();
+      if(item.error||! /^[0-9a-f]{6}$/.test(icao))return;
+      try{
+        const track=await get("/api/history?icao="+encodeURIComponent(icao)+"&date="+today);
+        const latest=latestFlightFromTodayTrack(track);
+        if(latest)item.latestToday=latest;
+      }catch(error){
+        item.todayTrackError=error?.message||"Today's track unavailable";
+      }
+    }));
     renderAircraftHistory();
   }
   function renderAircraftHistory() {
@@ -829,7 +896,7 @@
         const duration=Number(f?.duration_min),arrival=Number(f?.to?.time||f?.last_seen);
         return /^[A-Z]{3}$/.test(from)&&/^[A-Z]{3}$/.test(to)&&from!==to&&Number.isFinite(duration)&&duration>=25&&duration<=600&&Number.isFinite(arrival);
       }).sort((a,b)=>Number(b.to?.time||b.last_seen)-Number(a.to?.time||a.last_seen));
-      const latest=complete[0]||null;
+      const latest=item.latestToday||complete[0]||null;
       const registration=data.r||item.registration;
       const coverage=data.coverage||{};
       const today=data.today||{};
@@ -841,10 +908,10 @@
         const ageMs=Math.max(0,Date.now()-arrivalTime);
         const age=ageMs<3600000?Math.max(1,Math.round(ageMs/60000))+" min ago":ageMs<86400000?Math.round(ageMs/3600000)+" h ago":Math.floor(ageMs/86400000)+" days ago";
         const call=String(latest.callsign||"").trim();
-        latestHtml='<div class="history-flight latest-history-flight"><div><b>'+esc(from)+' → '+esc(to)+'</b><small>'+esc(latest.day||"Date unavailable")+(call?" · "+esc(call):"")+'</small><small>'+esc(historyAirportStamp(latest.from))+' → '+esc(historyAirportStamp(latest.to))+'</small><small>Arrival observation: '+esc(seen)+' · '+esc(age)+'</small></div></div>';
+        latestHtml='<div class="history-flight latest-history-flight"><div><b>'+esc(from)+' → '+esc(to)+'</b><small>'+esc(latest.day||"Date unavailable")+(call?" · "+esc(call):"")+'</small><small>'+esc(historyAirportStamp(latest.from))+' → '+esc(historyAirportStamp(latest.to))+'</small><small>Arrival observation: '+esc(seen)+' · '+esc(age)+'</small>'+(latest.inferred?'<small>Route inferred from today's ADS-B track and airport proximity; not an airline movement record.</small>':'')+'</div></div>';
       }
       const note=today.available===false?"Today's flight history is not included in the current API plan. This is the latest record available from the historical endpoint, not necessarily the aircraft's latest movement today.":"Historical ADS-B-derived observations, not an airline movement log; event times are not guaranteed takeoff or touchdown timestamps.";
-      return '<div class="history-aircraft"><div class="flighttop"><div><div class="flightno">'+esc(registration)+'</div><div class="muted">ICAO HEX '+esc(data.icao||"—")+' · HISTORY '+esc(coverage.from||"—")+' to '+esc(coverage.to||"—")+'</div></div><span class="status none">LATEST RECORDED FLIGHT</span></div>'+latestHtml+'<div class="notice">'+esc(note)+'</div></div>';
+      return '<div class="history-aircraft"><div class="flighttop"><div><div class="flightno">'+esc(registration)+'</div><div class="muted">ICAO HEX '+esc(data.icao||"—")+' · HISTORY '+esc(coverage.from||"—")+' to '+esc(coverage.to||"—")+'</div></div><span class="status none">'+(latest.inferred?"TODAY · ADS-B TRACK":"LATEST ARCHIVE")+'</span></div>'+latestHtml+'<div class="notice">'+esc(note)+'</div></div>';
     }).join("");
   }
 
