@@ -779,6 +779,26 @@
     if(altitude!==null&&altitude>=20000&&(verticalRate===null||Math.abs(verticalRate)<700))return {icon:"✈️",label:"CRUISE",className:"air"};
     return {icon:"✈️",label:"AIRBORNE",className:"air"};
   }
+  // Approximate remaining flight time with a simplified 737NG descent profile.
+  // ADS-B reports groundspeed; scale it down progressively to represent descent deceleration.
+  function estimateArrivalMinutes(distanceNm,altitudeFt,groundSpeedKt) {
+    if(!Number.isFinite(distanceNm)||!Number.isFinite(altitudeFt)||!Number.isFinite(groundSpeedKt)||groundSpeedKt<100)return null;
+    const distance=Math.max(0,distanceNm),alt=Math.max(0,altitudeFt),cruiseGs=groundSpeedKt;
+    const bands=[
+      {height:Math.max(0,alt-10000),factor:0.88},
+      {height:Math.max(0,Math.min(alt,10000)-3000),factor:0.72},
+      {height:Math.min(alt,3000),factor:0.58}
+    ];
+    const plannedDescentDistance=bands.reduce((sum,b)=>sum+b.height/1000*3,0);
+    const scale=plannedDescentDistance>0?Math.min(1,distance/plannedDescentDistance):0;
+    let descentMinutes=0;
+    for(const band of bands){
+      const bandDistance=band.height/1000*3*scale;
+      descentMinutes+=bandDistance/Math.max(120,cruiseGs*band.factor)*60;
+    }
+    const cruiseDistance=Math.max(0,distance-plannedDescentDistance*scale);
+    return Math.max(0,Math.round(cruiseDistance/cruiseGs*60+descentMinutes));
+  }
   function renderAircraft(flight,ac,isInbound=false) {
     const onGround=ac.alt_baro==="ground";
     const altitude=numeric(ac.alt_baro), speed=numeric(ac.gs), lat=numeric(ac.lat), lon=numeric(ac.lon);
@@ -792,7 +812,7 @@
     const phase=flightPhase(ac,distanceToDestination,onGround);
     let eta=null, etaMinutes=null, punctualityLabel="", punctualityClass="air", etaLabel="Not available";
     if(!onGround&&speed!==null&&speed>=100&&Number.isFinite(distanceToDestination)){
-      const minutes=Math.max(0,Math.round(distanceToDestination/speed*60));
+      const minutes=estimateArrivalMinutes(distanceToDestination,altitude??0,speed);
       etaMinutes=minutes;
       eta=new Date(Date.now()+minutes*60000);
       etaLabel=fmt(eta,destination.tz);
