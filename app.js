@@ -573,7 +573,15 @@
     const taxiing=onGround&&speed!==null&&speed>=5;
     const status=onGround?(taxiing?"TAXIING":"ON GROUND"):lowNearDestination?"NEAR DESTINATION · STATUS UNCONFIRMED":altitude!==null?"AIRBORNE":"UNKNOWN";
     const statusClass=onGround||lowNearDestination?"ground":status==="AIRBORNE"?"air":"none";
-    return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><span class="status ${statusClass}">${status}</span></div><div class="notice">${ac.boardEvidence?"DAILY BOARD REGISTRATION MATCH — "+esc(ac.boardEvidence.registration)+". ":""}${ac.turnaroundEvidence?"SAME-HEX TURNAROUND OBSERVED — "+esc(ac.turnaroundEvidence.inboundFlight)+" inbound to "+esc(flight.origin)+". ":""}Live ADS-B reports the aircraft ${onGround?(taxiing?"on the surface and moving at "+Math.round(speed||0)+" kt":"on the surface"):"airborne"}. Registration and HEX are read from the transponder feed. The airport board assignment is not airline-confirmed.</div>
+    let eta=null, punctuality="—", etaLabel="Not available";
+    if(!onGround&&speed!==null&&speed>=100&&Number.isFinite(distanceToDestination)){
+      const minutes=Math.max(0,Math.round(distanceToDestination/speed*60));
+      eta=new Date(Date.now()+minutes*60000);
+      etaLabel=fmt(eta,destination.tz);
+      const difference=Math.round((eta-flight.arrival)/60000);
+      punctuality=Math.abs(difference)<=5?"ON TIME":Math.abs(difference)+" MIN "+(difference<0?"EARLY":"LATE");
+    }
+    return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><span class="status ${statusClass}">${status}</span></div><div class="notice">${ac.boardEvidence?"DAILY BOARD REGISTRATION MATCH — "+esc(ac.boardEvidence.registration)+". ":""}Live ADS-B reports the aircraft ${onGround?(taxiing?"on the surface and moving at "+Math.round(speed||0)+" kt":"on the surface"):"airborne"}. Registration and HEX are read from the transponder feed. The airport board assignment is not airline-confirmed.</div>
       <div class="stats">
         <div class="stat"><small>ADS-B callsign · unverified</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
         <div class="stat"><small>ICAO HEX</small><strong>${esc(ac.hex)}</strong></div>
@@ -581,9 +589,11 @@
         <div class="stat"><small>Aircraft type</small><strong>${esc(ac.t)}</strong></div>
         <div class="stat"><small>Ground speed</small><strong>${speed===null?"—":Math.round(speed)+" kt"}</strong></div>
         <div class="stat"><small>Altitude</small><strong>${onGround?"GROUND":altitude===null?"—":Math.round(altitude).toLocaleString()+" ft"}</strong></div>
+        <div class="stat"><small>ESTIMATED ARRIVAL · LOCAL</small><strong>${esc(etaLabel)}</strong></div>
+        <div class="stat"><small>ESTIMATED ARRIVAL VS SCHEDULE</small><strong>${esc(punctuality)}</strong></div>
         <div class="stat"><small>Latitude</small><strong>${lat===null?"—":lat.toFixed(4)}</strong></div>
         <div class="stat"><small>Longitude</small><strong>${lon===null?"—":lon.toFixed(4)}</strong></div>
-      </div><div class="notice">ADS-B position age: ${Math.round(positionAge(ac))} seconds. This is observational data, not airline-confirmed flight status.</div>`;
+      </div><div class="notice">ETA is a simple live estimate from remaining great-circle distance and current ground speed; wind, routing and speed changes can alter it. ADS-B position age: ${Math.round(positionAge(ac))} seconds.</div>`;
   }
   function render() {
     const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();
@@ -658,14 +668,8 @@
       const confidence="LIVE ADS-B · BOARD REGISTRATION MATCH";
       const boardChain=ac.boardEvidence?" · AIRPORT BOARD REGISTRATION "+esc(ac.boardEvidence.registration)+(ac.boardEvidence.previousFlight?" · PREVIOUS "+esc(ac.boardEvidence.previousFlight):"")+(ac.boardEvidence.nextFlight?" · NEXT "+esc(ac.boardEvidence.nextFlight):"")+(ac.boardEvidence.destinationSwap?" · SWAP AT "+esc(f.destination)+": "+esc(ac.boardEvidence.oppositeFlight)+" assigned "+esc(ac.boardEvidence.oppositeRegistration):""):"";
       const evidence=`${Math.round(positionAge(ac))}s since last position · ${esc(ac.source||"FlyItalyADSB")}${boardChain}`;
-      const action=`<button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button>`;
-      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${esc(dep)} · ARR ${esc(arr)}</small></div><span class="status none">${esc(confidence)}</span></div><small>${esc((ac.flight||"").trim()||"Callsign not broadcast")} · ${esc(ac.t||"Type unavailable")} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · GS ${numeric(ac.gs)===null?"—":Math.round(numeric(ac.gs))+" kt"} · ALT ${ac.alt_baro==="ground"?"GROUND":numeric(ac.alt_baro)===null?"—":Math.round(numeric(ac.alt_baro))+" ft"} · ${evidence}<br>Position is live ADS-B data. Flight-to-aircraft assignment comes from the Nuremberg Airport board and is not airline-confirmed.</small>${action}</div>`;
+      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${esc(dep)} · ARR ${esc(arr)}</small></div><span class="status none">${esc(confidence)}</span></div><small>${esc((ac.flight||"").trim()||"Callsign not broadcast")} · ${esc(ac.t||"Type unavailable")} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · GS ${numeric(ac.gs)===null?"—":Math.round(numeric(ac.gs))+" kt"} · ALT ${ac.alt_baro==="ground"?"GROUND":numeric(ac.alt_baro)===null?"—":Math.round(numeric(ac.alt_baro))+" ft"} · ${evidence}<br>Automatically matched from the NUE airport-board registration and live ADS-B response. Assignment is not airline-confirmed.</small></div>`;
     }).join("");
-    el.querySelectorAll("[data-pick]").forEach(button=>button.addEventListener("click",()=>{
-      const item=items[Number(button.dataset.pick)]; if(!item||item.aircraft.boardOnly)return;
-      saveSelected(item.flight,item.aircraft); render();
-      $("connection").textContent="Live aircraft selected · registration matched to the Nuremberg Airport board";
-    }));
   }
 
   async function refreshSelected() {
@@ -719,7 +723,7 @@
         return;
       }
       const nowMs=Date.now();
-      const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-360*60000&&nowMs<=f.arrival.getTime()+360*60000);
+      const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-90*60000&&nowMs<=f.arrival.getTime()+45*60000);
       if(!searchFlights.length){
         renderCandidates([],"No selected-route flight is within six hours of its scheduled departure or arrival. The daily board was loaded, but no ADS-B registration was queried.");
         $("connection").textContent="Timetable loaded · no flight inside the live tracking window";
@@ -737,8 +741,18 @@
         else lookupErrors.push(`${searchFlights[i].flightNumber}: ${r.reason?.message||"registration lookup failed"}`);
       });
       state.candidates=final;
-      const taxiingMatch=final.find(item=>!item.aircraft.boardOnly&&item.flight.origin==="NUE"&&item.aircraft.onGround&&numeric(item.aircraft.gs)!==null&&numeric(item.aircraft.gs)>=5&&hav(airport("NUE"),{lat:numeric(item.aircraft.lat),lon:numeric(item.aircraft.lon)})<=5);
-      if(taxiingMatch)saveSelected(taxiingMatch.flight,taxiingMatch.aircraft);
+      const now=new Date();
+      const live=final.filter(item=>!item.aircraft.boardOnly);
+      const airborne=live.filter(item=>{
+        const f=item.flight, ac=item.aircraft, altitude=numeric(ac.alt_baro), speed=numeric(ac.gs);
+        return altitude!==null&&altitude>1500&&speed!==null&&speed>=100&&nowMs>=f.departure.getTime()-20*60000&&nowMs<=f.arrival.getTime()+30*60000;
+      }).sort((a,b)=>Math.abs(a.flight.arrival.getTime()-nowMs)-Math.abs(b.flight.arrival.getTime()-nowMs));
+      const ground=live.filter(item=>{
+        const f=item.flight, ac=item.aircraft, lat=numeric(ac.lat), lon=numeric(ac.lon);
+        return ac.alt_baro==="ground"&&f.origin==="NUE"&&nowMs>=f.departure.getTime()-90*60000&&nowMs<=f.departure.getTime()+20*60000&&lat!==null&&lon!==null&&hav(airport("NUE"),{lat,lon})<=5;
+      }).sort((a,b)=>a.flight.departure-b.flight.departure);
+      const automatic=airborne[0]||ground[0]||null;
+      if(automatic)saveSelected(automatic.flight,automatic.aircraft);
       else state.selected=null;
       const liveCount=final.filter(item=>!item.aircraft.boardOnly).length;
       const boardOnlyCount=final.length-liveCount;
