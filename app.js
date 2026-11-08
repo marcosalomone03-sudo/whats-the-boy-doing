@@ -1100,7 +1100,7 @@
         let inferred=null;
         for(const eventMs of eventTimes){
           const matches=boardMatches.map(row=>({origin:row.origin,destination:row.destination,time:Date.parse(row.scheduledTime||""),distance:Math.abs(Date.parse(row.scheduledTime||"")-eventMs)}))
-            .filter(item=>Number.isFinite(item.time)&&item.distance<=4*3600000)
+            .filter(item=>Number.isFinite(item.time)&&item.distance<=90*60000)
             .sort((a,b)=>a.distance-b.distance);
           if(matches.length){inferred=matches[0];break;}
         }
@@ -1124,7 +1124,7 @@
             }
             for(const check of checks){
               const targetMs=check.target instanceof Date?check.target.getTime():Date.parse(check.target);
-              if(Number.isFinite(targetMs)&&Math.abs(check.ms-targetMs)<=4*3600000)
+              if(Number.isFinite(targetMs)&&Math.abs(check.ms-targetMs)<=90*60000)
                 candidates.push({origin:f.origin,destination:f.destination,time:targetMs,distance:Math.abs(check.ms-targetMs)});
             }
           }
@@ -1144,6 +1144,17 @@
       if(!routeSet.has(origin+"-"+destination))continue;
       const observedRegistration=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       if(!observedRegistration||!eligibleRegistrations.has(observedRegistration))continue;
+      // When endpoints are incomplete and the route was inferred from a
+      // scheduled sector, require an event close to that sector's actual
+      // scheduled departure/arrival. A registration alone is not enough:
+      // the same aircraft can operate several unrelated legs that day.
+      if(inferredFromScheduleCount>0&&(!from?.time&&!to?.time))continue;
+      const observedEventTimes=[from?.time,to?.time].filter(value=>value!==null&&value!==undefined&&Number.isFinite(Number(value))).map(value=>Number(value)*1000);
+      if(observedEventTimes.length){
+        const relevantSchedules=scheduleRouteRows.filter(f=>f.origin===origin&&f.destination===destination);
+        const nearestScheduleDistance=Math.min(...relevantSchedules.flatMap(f=>observedEventTimes.map(ms=>Math.min(Math.abs(ms-f.departure.getTime()),Math.abs(ms-f.arrival.getTime())))));
+        if(!Number.isFinite(nearestScheduleDistance)||nearestScheduleDistance>90*60000)continue;
+      }
       routeMatchCount++;
       const flight={...rawFlight,from,to};
       const dep=flight.from?.time!==null&&flight.from?.time!==undefined?Number(flight.from.time)*1000:NaN;
