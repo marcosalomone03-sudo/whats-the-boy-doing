@@ -294,6 +294,16 @@ export default {
     const board=await nurembergDailyBoard(date);
     return cors(JSON.stringify(board),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
    }
+   if(u.pathname==="/api/flight-reg"){
+    if(!env.FLYITALYADSB_API_KEY)return cors(JSON.stringify({error:"FLYITALYADSB_API_KEY secret is not configured on this Worker."}),503,{"Content-Type":"application/json"});
+    const registration=(u.searchParams.get("reg")||"").toUpperCase().trim();
+    if(!/^[A-Z0-9][A-Z0-9 .-]{1,11}$/.test(registration))return cors(JSON.stringify({error:"Invalid aircraft registration"}),400,{"Content-Type":"application/json"});
+    const upstream=await fetch("https://api.flyitalyadsb.com/v2/flights/reg/"+encodeURIComponent(registration),{
+     headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/20.0"}
+    });
+    const body=await upstream.text();
+    return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"no-store","X-WTBD-Flight-History-Source":"FlyItalyADSB"});
+   }
    if(u.pathname==="/api/registration"){
     if(!env.FLYITALYADSB_API_KEY)return cors(JSON.stringify({error:"FLYITALYADSB_API_KEY secret is not configured on this Worker."}),503,{"Content-Type":"application/json"});
     const registration=(u.searchParams.get("reg")||"").toUpperCase().trim();
