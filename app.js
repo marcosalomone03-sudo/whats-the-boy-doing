@@ -1185,31 +1185,24 @@
         departure,arrival,delayMinutes,registration:String(observedFlight.r||"").trim(),type:String(observedFlight.t||"").trim(),
         callsign:String(observedFlight.callsign||"").trim(),flightNumber:schedule?.flightNumber||String(observedFlight.callsign||"").trim()||"OBSERVED FLIGHT"};
     });
-    // A single scheduled sector can appear more than once in receiver data:
-    // for example, one record may capture the arrival and another a later
-    // ground/low-altitude movement by the same aircraft. Keep the observation
-    // closest to the matching scheduled endpoint, rather than counting both
-    // as separate flights or assigning a second delay to the same flight.
-    const bestByScheduledSector=new Map(),unmatchedRows=[];
+    // Offer no more than three distinct Ryanair aircraft observed on the
+    // exact route entered by the user. The selected registration becomes the
+    // key for the complete daily aircraft-flight log.
+    const candidateAircraft=new Map();
     for(const row of candidateRows){
-      if(!row.schedule){unmatchedRows.push(row);continue;}
-      const depDistance=row.departure?Math.abs(row.departure.getTime()-row.schedule.departure.getTime()):Infinity;
-      const arrDistance=row.arrival?Math.abs(row.arrival.getTime()-row.schedule.arrival.getTime()):Infinity;
-      const score=Math.min(depDistance,arrDistance);
-      const key=[row.schedule.date,row.schedule.flightNumber,row.schedule.origin,row.schedule.destination].join("|");
-      const previous=bestByScheduledSector.get(key);
-      if(!previous||score<previous.score)bestByScheduledSector.set(key,{row,score});
+      const routeKey=row.origin+"-"+row.destination;
+      const registration=String(row.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      const icao=String(row.observed?.icao||"").toLowerCase();
+      if(!routeSet.has(routeKey)||!/^RYR/i.test(row.callsign)||!registration||!/^[0-9a-f]{6}$/.test(icao))continue;
+      const key=registration+"|"+icao;
+      const previous=candidateAircraft.get(key);
+      const time=(row.departure||row.arrival)?.getTime()||Infinity;
+      const previousTime=previous?((previous.seed.departure||previous.seed.arrival)?.getTime()||Infinity):Infinity;
+      if(!previous||time<previousTime)candidateAircraft.set(key,{registration,icao,type:row.type,callsign:row.callsign,seed:row});
     }
-    const rows=[...unmatchedRows,...[...bestByScheduledSector.values()].map(item=>item.row)]
-      .sort((a,b)=>(a.departure?.getTime()||a.arrival?.getTime()||0)-(b.departure?.getTime()||b.arrival?.getTime()||0));
-    for(let i=0;i<rows.length-1;i++){
-      const current=rows[i],next=rows[i+1];
-      if(current.destination!==next.origin)continue;
-      if(current.registration&&next.registration){
-        current.nextOperation=current.registration===next.registration?"TURNAROUND":"AIRCRAFT CHANGE";
-        current.nextRegistration=next.registration===current.registration?"SAME AIRCRAFT":next.registration;
-      }else current.nextOperation="TURNAROUND / AIRCRAFT CHANGE · REGISTRATION UNAVAILABLE";
-    }
+    const historicalCandidates=[...candidateAircraft.values()]
+      .sort((a,b)=>Number(!!b.seed.schedule)-Number(!!a.seed.schedule)||((a.seed.departure||a.seed.arrival)?.getTime()||0)-((b.seed.departure||b.seed.arrival)?.getTime()||0))
+      .slice(0,3);
     state.candidates=[];state.selected=null;state.aircraftChange=null;state.turnaround=null;state.inboundAircraft=null;state.dayFinished=false;
     const coverage=observedResults.map((result,index)=>result.status==="fulfilled"?(result.value?.coverage?.missing||[]):[]).flat();
     const coverageMessage=[
@@ -1224,9 +1217,92 @@
       "Historical matching diagnostics: "+scheduleRouteRows.length+" timetable sectors · "+(state.dailyBoard?.flights?.length||0)+" NUE board rows · "+inferredFromScheduleCount+" incomplete ADS-B routes inferred.",
       "NUE board entries: "+(state.dailyBoard?.flights||[]).map(row=>[row.flightNumber,row.origin+"-"+row.destination,row.registration||"REG N/A",row.scheduledTime||row.scheduledLocalTime||"TIME N/A"].join(" ")).join(" | "),
       "Schedule requests: "+(state.scheduleDiagnostics||[]).map(item=>[item.route,item.date,item.source||"source",item.count??item.flightCount??item.returned??"no count"].join(" ")).join(" | "),
-      !windowMatchCount&&rawObservedCount?"Sample observed routes: "+[...new Set(routeSamples)].join(", "):""
+      !windowMatchCount&&rawObservedCount?"Sample observed routes: "+[...new Set(routeSamples)].join(", "):"",
+      "Ryanair aircraft candidates on the entered route: "+historicalCandidates.length+" (maximum 3)."
     ].filter(Boolean).join(" ");
-    renderHistoricalDuty(rows,date,coverageMessage);
+    renderHistoricalCandidatePicker(historicalCandidates,date,coverageMessage);
+  }
+
+  function renderHistoricalCandidatePicker(candidates,date,coverageMessage="") {
+    state.historicalCandidates=candidates;
+    state.historicalDate=date;
+    state.historicalCoverage=coverageMessage;
+    $("current").innerHTML='<div class="stats"><div class="stat"><small>Aircraft options</small><strong>'+candidates.length+' / 3</strong></div><div class="stat"><small>Search date</small><strong>'+esc(date)+'</strong></div></div><div class="notice">SELECT THE AIRCRAFT THAT MATCHES THE BOY’S DUTY. Each option is a distinct Ryanair registration observed on the route you entered.</div>';
+    $("nextFlight").innerHTML='<div class="empty">'+(candidates.length?"Choose one aircraft to reconstruct its complete observed flight sequence.":"No Ryanair aircraft could be confidently matched to the entered route on this date.")+'</div>';
+    $("aircraftChangeSection").hidden=true;
+    $("sectorCount").textContent=candidates.length+" AIRCRAFT OPTIONS";
+    if(!candidates.length){
+      $("sectors").innerHTML='<div class="empty">No selectable aircraft found. The ADS-B receiver may not have captured the route, or the callsign/registration may be missing.</div>';
+    }else{
+      $("sectors").innerHTML=candidates.map((item,index)=>{
+        const seed=item.seed,originTz=airport(seed.origin)?.tz||"UTC",destinationTz=airport(seed.destination)?.tz||"UTC";
+        const observedTime=seed.departure?"DEPARTURE "+fmt(seed.departure,originTz):seed.arrival?"ARRIVAL "+fmt(seed.arrival,destinationTz):"TIME UNAVAILABLE";
+        return '<div class="candidate historical-candidate"><div><b>OPTION '+(index+1)+' · '+esc(seed.flightNumber)+' · '+esc(seed.origin)+' → '+esc(seed.destination)+'</b><small>'+esc(item.callsign)+' · '+esc(item.registration)+' · '+esc(item.type||"TYPE UNKNOWN")+'</small><small>'+esc(observedTime)+(seed.schedule?" · TIMETABLE MATCH":" · ADS-B OBSERVATION")+'</small></div><button class="secondary" type="button" data-historical-candidate="'+index+'">SELECT</button></div>';
+      }).join("");
+    }
+    $("candidates").className="empty";
+    $("candidates").textContent=coverageMessage||"Historical mode · live tracking disabled.";
+    $("connection").textContent="Choose one of up to three aircraft candidates";
+    $("lastUpdated").textContent="HISTORICAL · "+date;
+    $("lastFlight").innerHTML='<div class="empty">Select an aircraft to load its historical flight log.</div>';
+  }
+
+  async function selectHistoricalAircraft(index) {
+    const candidate=state.historicalCandidates?.[index];
+    if(!candidate)return;
+    $("connection").textContent="Loading the selected aircraft’s observed flight log…";
+    $("sectorCount").textContent="LOADING AIRCRAFT HISTORY";
+    $("sectors").innerHTML='<div class="empty">Reading all observed sectors for '+esc(candidate.registration)+'…</div>';
+    try{
+      const nextDate=addCalendarDay(state.historicalDate);
+      const params=new URLSearchParams({reg:candidate.registration,from:state.historicalDate,to:nextDate});
+      const history=await get("/api/flight-reg?"+params.toString());
+      const start=dateAtAirport(state.historicalDate,"03:00",airport("NUE")).getTime();
+      const end=dateAtAirport(nextDate,"03:00",airport("NUE")).getTime();
+      const unique=new Map();
+      for(const flight of (Array.isArray(history?.flights)?history.flights:[])){
+        const origin=historicalAirportIata(flight?.from),destination=historicalAirportIata(flight?.to);
+        if(!origin||!destination||origin===destination)continue;
+        const depValue=flight.from?.time,arrValue=flight.to?.time;
+        const depMs=depValue!==null&&depValue!==undefined&&Number.isFinite(Number(depValue))?Number(depValue)*1000:NaN;
+        const arrMs=arrValue!==null&&arrValue!==undefined&&Number.isFinite(Number(arrValue))?Number(arrValue)*1000:NaN;
+        const anchor=Number.isFinite(depMs)?depMs:arrMs;
+        if(!Number.isFinite(anchor)||anchor<start||anchor>=end)continue;
+        const observed={...flight,from:{...flight.from,iata:origin},to:{...flight.to,iata:destination}};
+        const scheduleMatch=historicalScheduleMatch(observed);
+        const schedule=scheduleMatch?.flight||null;
+        const departure=Number.isFinite(depMs)?new Date(depMs):null;
+        const arrival=Number.isFinite(arrMs)?new Date(arrMs):null;
+        const delayMinutes=arrival&&schedule?Math.round((arrival.getTime()-schedule.arrival.getTime())/60000):null;
+        const row={
+          observed,schedule,board:scheduleMatch?.board||null,origin,destination,departure,arrival,delayMinutes,
+          registration:String(flight.r||candidate.registration).trim(),type:String(flight.t||candidate.type||"").trim(),
+          callsign:String(flight.callsign||"").trim(),flightNumber:schedule?.flightNumber||String(flight.callsign||"").trim()||"OBSERVED FLIGHT"
+        };
+        const key=[origin,destination,Number.isFinite(depMs)?Math.round(depMs/60000):"",Number.isFinite(arrMs)?Math.round(arrMs/60000):""].join("|");
+        if(!unique.has(key))unique.set(key,row);
+      }
+      const rows=[...unique.values()].sort((a,b)=>(a.departure?.getTime()||a.arrival?.getTime()||0)-(b.departure?.getTime()||b.arrival?.getTime()||0));
+      // A same-registration continuation is a turnaround only when the next
+      // observed sector departs the airport just reached within six hours.
+      for(let i=0;i<rows.length-1;i++){
+        const current=rows[i],next=rows[i+1];
+        if(current.destination!==next.origin||!current.arrival||!next.departure)continue;
+        const gap=(next.departure.getTime()-current.arrival.getTime())/60000;
+        if(gap>=0&&gap<=360){
+          current.nextOperation="TURNAROUND";
+          current.nextRegistration="SAME AIRCRAFT · "+candidate.registration;
+        }
+      }
+      const note="Selected aircraft: "+candidate.registration+" · "+candidate.icao+" · "+candidate.callsign+". Flight-log records returned: "+(history.flights?.length||0)+". "+(history.coverage?.missing?.length?"Missing history days: "+history.coverage.missing.join(", ")+".":"");
+      renderHistoricalDuty(rows,state.historicalDate,[state.historicalCoverage,note].filter(Boolean).join(" "));
+      if(!rows.length) $("candidates").textContent+=" The selected aircraft history contained no complete sectors in the operational window.";
+    }catch(error){
+      $("connection").textContent="Aircraft history unavailable";
+      $("sectorCount").textContent="HISTORY UNAVAILABLE";
+      $("sectors").innerHTML='<div class="empty">Could not load the selected aircraft history.</div>';
+      showError(error?.message||"Unable to load the selected aircraft’s flight history.");
+    }
   }
 
   function historyAirportStamp(event) {
@@ -1641,6 +1717,10 @@
       renderCandidates([],"Search failed. Check the error message above and try again.");
     } finally { button.disabled=false; button.textContent="REFRESH DUTY & AIRCRAFT ↗"; }
   }
+  $("sectors").addEventListener("click",event=>{
+    const button=event.target.closest("[data-historical-candidate]");
+    if(button)selectHistoricalAircraft(Number(button.dataset.historicalCandidate));
+  });
   $("track").addEventListener("click",run);
   $("route").addEventListener("input",event=>{event.target.value=event.target.value.toUpperCase(); try { localStorage.setItem(LAST_ROUTE_KEY,event.target.value); } catch(e) { console.warn("Unable to save last route",e); }});
   $("flightDate").addEventListener("change",event=>{try { if(event.target.value)localStorage.setItem(LAST_DATE_KEY,event.target.value); } catch(e) { console.warn("Unable to save last date",e); }});
