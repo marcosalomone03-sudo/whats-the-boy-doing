@@ -323,9 +323,9 @@
     return null;
   }
   function renderInboundAircraft() {
-    const el=$("inboundAircraft"); if(!el)return;
     const item=state.inboundAircraft;
-    el.innerHTML=item?'<div class="candidate"><div class="notice">THE AIRCRAFT ASSIGNED TO YOUR UPCOMING FLIGHT IS CURRENTLY OPERATING THIS INBOUND SECTOR</div>'+renderAircraft(item.flight,item.aircraft)+'<div class="notice">This is the aircraft’s current inbound flight, not your selected outbound flight. Its assignment is based on the NUE airport board registration and is not airline-confirmed.</div></div>':"";
+    if(!item)return "";
+    return '<div class="inbound-card"><div class="notice inbound-heading">THE AIRCRAFT ASSIGNED TO YOUR UPCOMING FLIGHT IS CURRENTLY OPERATING THIS INBOUND SECTOR</div>'+renderAircraft(item.flight,item.aircraft)+'<div class="notice">This is the aircraft’s current inbound flight, not your selected outbound flight. Its assignment is based on the NUE airport board registration and is not airline-confirmed.</div></div>';
   }
   async function identifyFlightByRegistration(flight,registrationCache=new Map()) {
     const row=boardRowForFlight(flight);
@@ -687,7 +687,7 @@
   }
   function renderCandidates(items,message="No flight or aircraft status found for the selected date and route.") {
     const el=$("candidates");
-    if (!items.length) { el.className="empty"; el.textContent=message; return; }
+    if (!items.length) { el.className="inbound-result"; el.innerHTML='<div class="empty inbound-empty">'+esc(message)+'</div>'+renderInboundAircraft(); return; }
     el.className="candidate-list";
     el.innerHTML=items.map((item,i)=>{
       const f=item.flight, ac=item.aircraft;
@@ -766,7 +766,6 @@
       if(!searchFlights.length){
         await findInboundAircraft(state.flights,registrationCache);
         renderCandidates([],"No live aircraft match for the selected route yet.");
-        renderInboundAircraft();
         $("connection").textContent="Timetable loaded · no selected-route aircraft inside the live tracking window";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
         if(scheduleErrors.length)showError(scheduleErrors.join("\\n"));
@@ -800,7 +799,6 @@
       const liveCount=final.filter(item=>!item.aircraft.boardOnly).length;
       const boardOnlyCount=final.length-liveCount;
       renderCandidates(final,final.length?"":"No live aircraft match for the selected route yet.");
-      renderInboundAircraft();
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
       $("connection").textContent=`${liveCount} live registration match(es) · ${boardOnlyCount} airport-board-only status(es) · no geographic aircraft matching`;
