@@ -957,7 +957,7 @@
       const board=boardRows.map(row=>({row,time:Date.parse(row.scheduledTime||"")})).filter(x=>Number.isFinite(x.time))
         .sort((a,b)=>Math.abs(a.time-targetMs)-Math.abs(b.time-targetMs))[0];
       if(board&&Math.abs(board.time-targetMs)<=4*3600000){
-        const scheduled=routeFlights.map(f=>({flight:f,distance:Math.abs(f.departure.getTime()-board.time)})).sort((a,b)=>a.distance-b.distance)[0];
+        const scheduled=routeFlights.map(f=>({flight:f,distance:Math.abs((f.origin==="NUE"?f.departure:f.arrival).getTime()-board.time)})).sort((a,b)=>a.distance-b.distance)[0];
         if(scheduled&&scheduled.distance<=4*3600000)return {flight:scheduled.flight,board:board.row};
       }
     }
@@ -998,7 +998,7 @@
           '<div class="stat"><small>Observed arrival · local</small><strong>'+esc(toTime)+'</strong><small>'+esc(historicalSeenLabel(o.to?.seen))+'</small></div>'+
           '<div class="stat"><small>Scheduled departure · local</small><strong>'+esc(scheduledDep)+'</strong></div>'+
           '<div class="stat"><small>Scheduled arrival · local</small><strong>'+esc(scheduledArr)+'</strong></div></div>'+
-          '<div class="notice">'+esc(f?"THE BOY IS "+historicalDelayText(delay):"PUNCTUALITY UNAVAILABLE · NO MATCHING SCHEDULE")+
+          '<div class="notice">'+esc(f?(Number.isFinite(delay)?"THE BOY IS "+historicalDelayText(delay):"ARRIVAL DELAY UNAVAILABLE · OBSERVED ARRIVAL OR SCHEDULE MISSING"):"PUNCTUALITY UNAVAILABLE · NO MATCHING SCHEDULE")+
           (item.arrival?" · Arrival event observed by ADS-B; this is not a guaranteed touchdown time.":" · The arrival airport event was not observed.")+
           (item.board?" · Registration corroborated by NUE airport board.":"")+'</div>'+operation+'</div>';
       }).join("");
