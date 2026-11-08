@@ -826,20 +826,25 @@
       const data=item.data||{},all=Array.isArray(data.flights)?data.flights:[];
       const complete=all.filter(f=>{
         const from=String(f?.from?.iata||"").toUpperCase(),to=String(f?.to?.iata||"").toUpperCase();
-        const duration=Number(f?.duration_min);
-        return /^[A-Z]{3}$/.test(from)&&/^[A-Z]{3}$/.test(to)&&from!==to&&Number.isFinite(duration)&&duration>=25&&duration<=600;
-      });
-      const rows=complete.slice(0,8).map(f=>{
-        const from=f.from.iata,to=f.to.iata;
-        const call=String(f.callsign||"").trim();
-        return '<div class="history-flight"><div><b>'+esc(from)+' → '+esc(to)+'</b><small>'+esc(f.day||"Date unavailable")+(call?" · "+esc(call):"")+' · '+esc(historyAirportStamp(f.from))+' → '+esc(historyAirportStamp(f.to))+'</small></div><div class="time">'+esc(String(f.duration_min))+' min</div></div>';
-      }).join("");
+        const duration=Number(f?.duration_min),arrival=Number(f?.to?.time||f?.last_seen);
+        return /^[A-Z]{3}$/.test(from)&&/^[A-Z]{3}$/.test(to)&&from!==to&&Number.isFinite(duration)&&duration>=25&&duration<=600&&Number.isFinite(arrival);
+      }).sort((a,b)=>Number(b.to?.time||b.last_seen)-Number(a.to?.time||a.last_seen));
+      const latest=complete[0]||null;
+      const registration=data.r||item.registration;
       const coverage=data.coverage||{};
       const today=data.today||{};
-      const notes=[];
-      if(all.length-complete.length)notes.push((all.length-complete.length)+" partial or anomalous record(s) excluded from the flight list.");
-      if(today.available===false)notes.push("Today's flight history is not included in the current API plan; live ADS-B and airport-board observations remain separate.");
-      return '<div class="history-aircraft"><div class="flighttop"><div><div class="flightno">'+esc(item.registration)+'</div><div class="muted">ICAO HEX '+esc(data.icao||"—")+' · '+esc(data.coverage?.from||"—")+' to '+esc(data.coverage?.to||"—")+'</div></div><span class="status none">HISTORICAL DATA</span></div><div class="stats"><div class="stat"><small>Returned records</small><strong>'+esc(data.count??all.length)+'</strong></div><div class="stat"><small>Usable flight legs</small><strong>'+esc(complete.length)+'</strong></div><div class="stat"><small>Airports</small><strong>'+esc(data.summary?.airports??"—")+'</strong></div><div class="stat"><small>Recorded flight time</small><strong>'+esc(data.summary?.minutes!==undefined?Math.round(Number(data.summary.minutes)/60*10)/10+" h":"—")+'</strong></div></div><div class="history-list">'+(rows||'<div class="empty">No complete flight legs in the returned history.</div>')+'</div>'+(notes.length?'<div class="notice">'+notes.map(esc).join(" ")+'</div>':"")+'<div class="notice">Historical ADS-B-derived airport observations, not an airline movement log. Airport event times are observations, not guaranteed takeoff or touchdown timestamps.</div></div>';
+      let latestHtml='<div class="empty">No complete flight is available in the returned history.</div>';
+      if(latest){
+        const from=latest.from.iata,to=latest.to.iata;
+        const seen=String(latest.to.seen||"unknown").toUpperCase();
+        const arrivalTime=Number(latest.to.time||latest.last_seen)*1000;
+        const ageMs=Math.max(0,Date.now()-arrivalTime);
+        const age=ageMs<3600000?Math.max(1,Math.round(ageMs/60000))+" min ago":ageMs<86400000?Math.round(ageMs/3600000)+" h ago":Math.floor(ageMs/86400000)+" days ago";
+        const call=String(latest.callsign||"").trim();
+        latestHtml='<div class="history-flight latest-history-flight"><div><b>'+esc(from)+' → '+esc(to)+'</b><small>'+esc(latest.day||"Date unavailable")+(call?" · "+esc(call):"")+'</small><small>'+esc(historyAirportStamp(latest.from))+' → '+esc(historyAirportStamp(latest.to))+'</small><small>Arrival observation: '+esc(seen)+' · '+esc(age)+'</small></div></div>';
+      }
+      const note=today.available===false?"Today's flight history is not included in the current API plan. This is the latest record available from the historical endpoint, not necessarily the aircraft's latest movement today.":"Historical ADS-B-derived observations, not an airline movement log; event times are not guaranteed takeoff or touchdown timestamps.";
+      return '<div class="history-aircraft"><div class="flighttop"><div><div class="flightno">'+esc(registration)+'</div><div class="muted">ICAO HEX '+esc(data.icao||"—")+' · HISTORY '+esc(coverage.from||"—")+' to '+esc(coverage.to||"—")+'</div></div><span class="status none">LATEST RECORDED FLIGHT</span></div>'+latestHtml+'<div class="notice">'+esc(note)+'</div></div>';
     }).join("");
   }
 
