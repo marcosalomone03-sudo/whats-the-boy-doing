@@ -592,7 +592,7 @@
     }
     const next=flights.find(f=>f.departure>now);
     $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
-    $("current").innerHTML=state.selected?renderAircraft(state.selected.flight,state.selected.aircraft):`<div class="empty">No aircraft selected. Possible ADS-B candidates require manual checking.</div>`;
+    $("current").innerHTML=state.selected?renderAircraft(state.selected.flight,state.selected.aircraft):`<div class="empty">No verified aircraft assignment. Only a strict same-HEX turnaround match will be shown.</div>`;
     const last=storageGet();
     $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST MANUAL SELECTION</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
   }
@@ -711,7 +711,7 @@
       // Never silently restore a previously selected aircraft after a fresh search.
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
-      $("connection").textContent=final.length?`${final.length} filtered live aircraft · not airline-confirmed`:"No aircraft passed the strict Ryanair 737 filter";
+      $("connection").textContent=final.length?`${final.length} turnaround-linked aircraft · ADS-B evidence, not airline-confirmed`:"No verified turnaround-linked aircraft";
       if (scheduleErrors.length||adsbErrors.length) showError([...scheduleErrors,...adsbErrors].join("\\n"));
     } catch(e) {
       showError(e.message||"Unable to load flight data."); $("connection").textContent="Unable to load flight data";
