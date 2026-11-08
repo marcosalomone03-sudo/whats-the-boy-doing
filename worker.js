@@ -126,9 +126,9 @@ async function nurembergDailyBoard(date){
    const f=row?.flight&&typeof row.flight==="object"?row.flight:row;
    const carrier=String(f?.airline?.iata||row?.airline?.iata||"").toUpperCase();
    if(!["FR","RK","RR","OE"].includes(carrier))continue;
-   const rawNumber=String(f?.number||f?.flightNumber||row?.flightNumber||row?.number||"").replace(/\\s/g,"").toUpperCase();
-   const flightNumber=/^(FR|RK|RR|OE)\\d{1,5}$/.test(rawNumber)?rawNumber:carrier+rawNumber;
-   if(!/^(FR|RK|RR|OE)\\d{1,5}$/.test(flightNumber))continue;
+   const rawNumber=String(f?.number||f?.flightNumber||row?.flightNumber||row?.number||"").replace(/\s/g,"").toUpperCase();
+   const flightNumber=/^(FR|RK|RR|OE)\d{1,5}$/.test(rawNumber)?rawNumber:carrier+rawNumber;
+   if(!/^(FR|RK|RR|OE)\d{1,5}$/.test(flightNumber))continue;
    const localDate=boardDate(row);
    if(localDate&&localDate!==dateCompact(date))continue;
    const from=boardAirport(row,"from")||(direction==="departures"?"NUE":"");
@@ -284,7 +284,7 @@ export default {
    }
    if(u.pathname==="/api/daily-board"){
     const date=u.searchParams.get("date")||new Date().toISOString().slice(0,10);
-    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
     const board=await nurembergDailyBoard(date);
     return cors(JSON.stringify(board),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
    }
