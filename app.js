@@ -945,8 +945,8 @@
   }
   function historicalScheduleMatch(observed) {
     const reg=String(observed.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-    const depMs=Number(observed.from?.time)*1000;
-    const arrMs=Number(observed.to?.time)*1000;
+    const depMs=observed.from?.time!==null&&observed.from?.time!==undefined?Number(observed.from.time)*1000:NaN;
+    const arrMs=observed.to?.time!==null&&observed.to?.time!==undefined?Number(observed.to.time)*1000:NaN;
     const routeFlights=state.flights.filter(f=>f.origin===observed.from?.iata&&f.destination===observed.to?.iata);
     if(!routeFlights.length)return null;
     const boardRows=(state.dailyBoard?.flights||[]).filter(row=>row.origin===observed.from?.iata&&row.destination===observed.to?.iata&&reg&&String(row.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"")===reg);
@@ -1036,7 +1036,8 @@
     for(const flight of observed){
       const origin=String(flight?.from?.iata||"").toUpperCase(),destination=String(flight?.to?.iata||"").toUpperCase();
       if(!routeSet.has(origin+"-"+destination))continue;
-      const dep=Number(flight.from?.time)*1000,arr=Number(flight.to?.time)*1000;
+      const dep=flight.from?.time!==null&&flight.from?.time!==undefined?Number(flight.from.time)*1000:NaN;
+      const arr=flight.to?.time!==null&&flight.to?.time!==undefined?Number(flight.to.time)*1000:NaN;
       const anchor=origin==="NUE"?(Number.isFinite(dep)?dep:arr):(Number.isFinite(arr)?arr:dep);
       if(!Number.isFinite(anchor)||anchor<start||anchor>=end)continue;
       const key=[flight.icao||"",origin,destination,Number.isFinite(dep)?dep:"",Number.isFinite(arr)?arr:""].join("|");
@@ -1045,8 +1046,8 @@
     const rows=[...unique.values()].map(observedFlight=>{
       const scheduleMatch=historicalScheduleMatch(observedFlight);
       const schedule=scheduleMatch?.flight||null;
-      const departure=Number.isFinite(Number(observedFlight.from?.time))?new Date(Number(observedFlight.from.time)*1000):null;
-      const arrival=Number.isFinite(Number(observedFlight.to?.time))?new Date(Number(observedFlight.to.time)*1000):null;
+      const departure=observedFlight.from?.time!==null&&observedFlight.from?.time!==undefined&&Number.isFinite(Number(observedFlight.from.time))?new Date(Number(observedFlight.from.time)*1000):null;
+      const arrival=observedFlight.to?.time!==null&&observedFlight.to?.time!==undefined&&Number.isFinite(Number(observedFlight.to.time))?new Date(Number(observedFlight.to.time)*1000):null;
       const delayMinutes=arrival&&schedule?Math.round((arrival.getTime()-schedule.arrival.getTime())/60000):null;
       return {observed:observedFlight,schedule,board:scheduleMatch?.board||null,origin:String(observedFlight.from?.iata||"").toUpperCase(),destination:String(observedFlight.to?.iata||"").toUpperCase(),
         departure,arrival,delayMinutes,registration:String(observedFlight.r||"").trim(),type:String(observedFlight.t||"").trim(),
