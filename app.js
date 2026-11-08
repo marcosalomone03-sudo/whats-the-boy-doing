@@ -54,7 +54,7 @@
     RAK:{name:"Marrakech",tz:"Africa/Casablanca",lat:31.6069,lon:-8.0363}
   };
 
-  const state = { flights:[], candidates:[], selected:null, inboundAircraft:null, aircraftChange:null, turnaround:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null };
+  const state = { flights:[], candidates:[], selected:null, inboundAircraft:null, aircraftChange:null, turnaround:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null, registrationHistory:[] };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
@@ -791,6 +791,58 @@
     $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST AUTO-MATCHED FLIGHT</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
   }
 
+  function historyAirportStamp(event) {
+    if(!event||!Number.isFinite(Number(event.time)))return "time unavailable";
+    const code=String(event.iata||event.airport||"").toUpperCase();
+    const ap=airport(code), tz=ap?.tz||"UTC";
+    const stamp=new Date(Number(event.time)*1000);
+    return new Intl.DateTimeFormat("en-GB",{timeZone:tz,day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(stamp)+" "+(ap?code:"UTC");
+  }
+  async function loadRegistrationHistories(items) {
+    state.registrationHistory=[];
+    const unique=new Map();
+    for(const item of items){
+      if(!item?.aircraft?.boardOnly)continue;
+      const registration=String(item.aircraft.r||item.aircraft.boardRow?.registration||"").toUpperCase().trim();
+      const key=registration.replace(/[^A-Z0-9]/g,"");
+      if(key&&!unique.has(key))unique.set(key,registration);
+    }
+    const targets=[...unique.entries()].slice(0,2);
+    const results=await Promise.allSettled(targets.map(([key,registration])=>get("/api/flight-reg?reg="+encodeURIComponent(registration)).then(data=>({key,registration,data}))));
+    for(let i=0;i<results.length;i++){
+      const result=results[i];
+      if(result.status==="fulfilled")state.registrationHistory.push(result.value);
+      else state.registrationHistory.push({key:targets[i][0],registration:targets[i][1],error:result.reason?.message||"History lookup failed"});
+    }
+    renderAircraftHistory();
+  }
+  function renderAircraftHistory() {
+    const section=$("aircraftHistorySection"),content=$("aircraftHistoryContent");
+    if(!section||!content)return;
+    if(!state.registrationHistory.length){section.hidden=true;content.innerHTML="";return;}
+    section.hidden=false;
+    content.innerHTML=state.registrationHistory.map(item=>{
+      if(item.error)return '<div class="notice">History for '+esc(item.registration)+': '+esc(item.error)+'</div>';
+      const data=item.data||{},all=Array.isArray(data.flights)?data.flights:[];
+      const complete=all.filter(f=>{
+        const from=String(f?.from?.iata||"").toUpperCase(),to=String(f?.to?.iata||"").toUpperCase();
+        const duration=Number(f?.duration_min);
+        return /^[A-Z]{3}$/.test(from)&&/^[A-Z]{3}$/.test(to)&&from!==to&&Number.isFinite(duration)&&duration>=25&&duration<=600;
+      });
+      const rows=complete.slice(0,8).map(f=>{
+        const from=f.from.iata,to=f.to.iata;
+        const call=String(f.callsign||"").trim();
+        return '<div class="history-flight"><div><b>'+esc(from)+' → '+esc(to)+'</b><small>'+esc(f.day||"Date unavailable")+(call?" · "+esc(call):"")+' · '+esc(historyAirportStamp(f.from))+' → '+esc(historyAirportStamp(f.to))+'</small></div><div class="time">'+esc(String(f.duration_min))+' min</div></div>';
+      }).join("");
+      const coverage=data.coverage||{};
+      const today=data.today||{};
+      const notes=[];
+      if(all.length-complete.length)notes.push((all.length-complete.length)+" partial or anomalous record(s) excluded from the flight list.");
+      if(today.available===false)notes.push("Today's flight history is not included in the current API plan; live ADS-B and airport-board observations remain separate.");
+      return '<div class="history-aircraft"><div class="flighttop"><div><div class="flightno">'+esc(item.registration)+'</div><div class="muted">ICAO HEX '+esc(data.icao||"—")+' · '+esc(data.coverage?.from||"—")+' to '+esc(data.coverage?.to||"—")+'</div></div><span class="status none">HISTORICAL DATA</span></div><div class="stats"><div class="stat"><small>Returned records</small><strong>'+esc(data.count??all.length)+'</strong></div><div class="stat"><small>Usable flight legs</small><strong>'+esc(complete.length)+'</strong></div><div class="stat"><small>Airports</small><strong>'+esc(data.summary?.airports??"—")+'</strong></div><div class="stat"><small>Recorded flight time</small><strong>'+esc(data.summary?.minutes!==undefined?Math.round(Number(data.summary.minutes)/60*10)/10+" h":"—")+'</strong></div></div><div class="history-list">'+(rows||'<div class="empty">No complete flight legs in the returned history.</div>')+'</div>'+(notes.length?'<div class="notice">'+notes.map(esc).join(" ")+'</div>':"")+'<div class="notice">Historical ADS-B-derived airport observations, not an airline movement log. Airport event times are observations, not guaranteed takeoff or touchdown timestamps.</div></div>';
+    }).join("");
+  }
+
   function renderCandidates(items,message="No flight or aircraft status found for the selected date and route.") {
     const el=$("candidates");
     if (!items.length) { el.className="inbound-result"; el.innerHTML='<div class="empty inbound-empty">'+esc(message)+'</div>'+renderInboundAircraft(); return; }
@@ -839,7 +891,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; state.turnaround=null; renderAircraftChange(); state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
+    state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; state.turnaround=null; renderAircraftChange(); state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null; state.registrationHistory=[]; renderAircraftHistory();
     $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
     $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
     try {
@@ -886,6 +938,7 @@
         else lookupErrors.push(`${searchFlights[i].flightNumber}: ${r.reason?.message||"registration lookup failed"}`);
       });
       state.candidates=final;
+      await loadRegistrationHistories(final);
       const now=new Date();
       const live=final.filter(item=>!item.aircraft.boardOnly);
       const airborne=live.filter(item=>{
