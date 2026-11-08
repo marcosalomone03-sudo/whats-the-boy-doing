@@ -401,6 +401,32 @@
     matches.sort((a,b)=>b.actual-a.actual);
     return matches[0]||null;
   }
+  async function replacementLandingFromHistory(registration,destination,referenceTime,cache) {
+    const reg=String(registration||"").trim();
+    if(!reg||!airport(destination))return null;
+    const key="replacement-reg|"+reg.toUpperCase().replace(/[^A-Z0-9]/g,"");
+    if(!cache.has(key))cache.set(key,get("/api/flight-reg?reg="+encodeURIComponent(reg)));
+    let details;
+    try{details=await cache.get(key);}catch{return null;}
+    const icao=String(details?.icao||"").toLowerCase();
+    if(!/^[0-9a-f]{6}$/.test(icao))return null;
+    const dates=[referenceTime.toISOString().slice(0,10),new Date(referenceTime.getTime()-86400000).toISOString().slice(0,10)];
+    const tracks=await Promise.all(dates.map(date=>{
+      const trackKey="replacement-track|"+icao+"|"+date;
+      if(!cache.has(trackKey))cache.set(trackKey,get("/api/history?icao="+encodeURIComponent(icao)+"&date="+encodeURIComponent(date)));
+      return cache.get(trackKey).catch(()=>null);
+    }));
+    const now=Date.now(),landings=[];
+    for(const track of tracks){
+      const event=latestGroundAirportLanding(track);
+      if(event?.airport!==destination||!Number.isFinite(Number(event.time)))continue;
+      const actual=new Date(Number(event.time)*1000);
+      if(actual.getTime()<=now+5*60000&&actual.getTime()>=referenceTime.getTime()-12*3600000)
+        landings.push({actual,scheduled:null,delayMinutes:null,status:"ADS-B ground observation",source:"FlyItalyADSB daily trace"});
+    }
+    landings.sort((x,y)=>y.actual.getTime()-x.actual.getTime());
+    return landings[0]||null;
+  }
   async function findAircraftChange(current,registrationCache) {
     state.aircraftChange=null;
     state.turnaround=null;
@@ -431,6 +457,8 @@
     });
     const dspGround=historyItem?.latestTodayLanding?.airport===destination?historyItem.latestTodayLanding:null;
     const dspEstimate=historyItem?.latestTodayEstimatedLanding?.airport===destination?historyItem.latestTodayEstimatedLanding:null;
+    if(!inboundLanding&&!dspGround&&!dspEstimate&&!inboundEta)
+      inboundLanding=await replacementLandingFromHistory(nextReg,destination,current.flight.arrival,registrationCache);
     const inboundHistory=!inboundLanding&&!dspGround&&!dspEstimate&&!inboundEta?await observedArrivalForRegistration(nextReg,destination,current.flight.arrival,registrationCache):null;
     const dspGroundEvidence=dspGround?{actual:new Date(Number(dspGround.time)*1000),scheduled:next.arrival,delayMinutes:null,status:"ADS-B ground observation",source:"FlyItalyADSB daily trace"}:null;
     const dspEstimateEvidence=dspEstimate&&Number.isFinite(Number(dspEstimate.time))?{actual:new Date(Number(dspEstimate.time)*1000),observed:new Date(Number(dspEstimate.observedTime)*1000),source:"FlyItalyADSB DSP descent estimate"}:null;
