@@ -54,7 +54,7 @@
     RAK:{name:"Marrakech",tz:"Africa/Casablanca",lat:31.6069,lon:-8.0363}
   };
 
-  const state = { flights:[], candidates:[], selected:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null };
+  const state = { flights:[], candidates:[], selected:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
@@ -267,6 +267,24 @@
       for(const item of state.observed)if(String(item.icao||item.hex||"").toLowerCase()===hexes[index])item.dailyTrace={timestamp:result.value.timestamp,trace,source:result.value.source||"FlyItalyADSB"};
     });
     renderObserved(errors.length?"Some FlyItalyADSB checks failed: "+[...new Set(errors)].join(" · "):"");
+  }
+  async function loadDailyBoard(date) {
+    const data=await get("/api/daily-board?date="+encodeURIComponent(date));
+    if(!Array.isArray(data?.flights))throw new Error("Daily NUE board response is incomplete.");
+    state.dailyBoard=data; return data;
+  }
+  function boardRegistrationEvidence(flight,registration) {
+    const reg=String(registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    if(!reg||!state.dailyBoard?.flights?.length)return null;
+    const rows=state.dailyBoard.flights.filter(x=>String(x.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"")===reg).sort((a,b)=>Date.parse(a.scheduledTime)-Date.parse(b.scheduledTime));
+    const target=rows.find(x=>x.flightNumber===flight.flightNumber&&x.origin===flight.origin&&x.destination===flight.destination);
+    if(!target)return null;
+    const targetTime=Date.parse(target.scheduledTime);
+    const previous=rows.filter(x=>x.destination===target.origin&&Date.parse(x.scheduledTime)<=targetTime).slice(-1)[0]||null;
+    const next=rows.find(x=>x.origin===target.destination&&Date.parse(x.scheduledTime)>targetTime)||null;
+    const opposite=state.dailyBoard.flights.find(x=>x.origin===target.destination&&x.destination===target.origin&&Math.abs(Date.parse(x.scheduledTime)-targetTime)<18*3600000)||null;
+    const oppositeReg=String(opposite?.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    return {registration:reg,flightNumber:target.flightNumber,previousFlight:previous?.flightNumber||null,nextFlight:next?.flightNumber||null,nextRegistration:next?.registration||null,destinationSwap:!!(opposite&&oppositeReg!==reg),oppositeFlight:opposite?.flightNumber||null,oppositeRegistration:opposite?.registration||null,source:"Nuremberg Airport daily board"};
   }
   async function loadNuePool(date) {
     try { const data=await get("/api/pool?date="+encodeURIComponent(date)); state.pool=data?.aircraft||null; return data; }
@@ -645,11 +663,12 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[];
+    state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
 
     $("candidates").className="empty"; $("candidates").textContent="Checking whether an aircraft can be linked to an inbound NUE arrival and the next outbound departure…";
     $("connection").textContent="Checking timetable…"; $("lastUpdated").textContent="SEARCHING";
     try {
+      const boardResult=await loadDailyBoard(date).catch(error=>{console.warn("Daily NUE board unavailable",error);return null;});
       const responses=await Promise.allSettled(routes.map(([o,d])=>loadRoute(o,d,date)));
       const scheduleErrors=[];
       responses.forEach((r,i)=>{ if(r.status==="fulfilled")state.flights.push(...r.value); else scheduleErrors.push(`${routes[i].join("-")}: ${r.reason?.message||"schedule unavailable"}`); });
@@ -696,27 +715,27 @@
       for (const item of all) {
         const key=String(item.aircraft.hex).toLowerCase();
         item.aircraft.turnaroundEvidence=turnaroundEvidence(item.flight,key);
+        item.aircraft.boardEvidence=boardRegistrationEvidence(item.flight,item.aircraft.r);
         const old=unique.get(key);
         const rank=(x)=>(x.aircraft.turnaroundEvidence?100000:0)+(x.aircraft.poolMatch?5000:0)+x.aircraft.score;
         if(!old||rank(item)>rank(old))unique.set(key,item);
       }
-      // Do not display speculative aircraft. A candidate must be a Ryanair Group
-      // registry match, currently on the ground at NUE, and the SAME HEX must
-      // have been observed at NUE on the preceding inbound arrival and this
-      // outbound departure window. Otherwise we deliberately show no aircraft.
-      const final=[...unique.values()].filter(item=>item.flight.origin==="NUE"&&item.aircraft.onGround&&item.aircraft.operatorMatch&&item.aircraft.turnaroundEvidence)
-        .sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,3);
+      // Require registry-confirmed Ryanair Group ownership, a live on-ground aircraft at NUE,
+      // and an official daily-board registration match. Same-HEX turnaround observations
+      // remain additional evidence, but are not mandatory when the board identifies a swap.
+      const final=[...unique.values()].filter(item=>item.flight.origin==="NUE"&&item.aircraft.onGround&&item.aircraft.operatorMatch&&item.aircraft.boardEvidence)
+        .sort((a,b)=>(b.aircraft.turnaroundEvidence?100000:0)+b.aircraft.score-((a.aircraft.turnaroundEvidence?100000:0)+a.aircraft.score)).slice(0,3);
       state.candidates=final;
       // If the same registered aircraft is linked across the inbound and outbound
       // legs and ADS-B shows it moving on the ground, select it automatically.
       const taxiingMatch=final.find(item=>numeric(item.aircraft.gs)!==null&&numeric(item.aircraft.gs)>=5);
       if(taxiingMatch) saveSelected(taxiingMatch.flight,taxiingMatch.aircraft);
       else state.selected=null;
-      renderCandidates(final,final.length?"Aircraft linked by matching the same transponder HEX on the inbound arrival and current outbound ground observation.":adsbErrors.length?"ADS-B service could not complete the search. No aircraft assignment is shown.":"No aircraft can currently be linked reliably to an inbound arrival and the next NUE departure. I am hiding speculative matches rather than showing unrelated traffic.");
+      renderCandidates(final,final.length?"Aircraft matched to the official NUE daily board by registration, with live ADS-B and registry checks. Aircraft swaps are evaluated as separate registrations.":adsbErrors.length?"ADS-B service could not complete the search. No aircraft assignment is shown.":boardResult?"No live on-ground aircraft with a registry-confirmed identity matched the daily board registration.":"Daily NUE board unavailable; no board-based aircraft assignment can be confirmed.");
       // Never silently restore a previously selected aircraft after a fresh search.
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
-      $("connection").textContent=final.length?`${final.length} turnaround-linked aircraft · ADS-B evidence, not airline-confirmed`:"No verified turnaround-linked aircraft";
+      $("connection").textContent=final.length?`${final.length} daily-board registration match(es) · live ADS-B checked, not airline-confirmed`:boardResult?"No verified daily-board aircraft match":"Daily NUE board unavailable";
       if (scheduleErrors.length||adsbErrors.length) showError([...scheduleErrors,...adsbErrors].join("\\n"));
     } catch(e) {
       showError(e.message||"Unable to load flight data."); $("connection").textContent="Unable to load flight data";
