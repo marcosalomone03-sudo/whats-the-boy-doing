@@ -685,8 +685,15 @@
     const last=storageGet();
     $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST AUTO-MATCHED FLIGHT</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
   }
+  function placeAutomaticMatch(showInbound) {
+    const section=$("automaticFlightMatch"), current=$("currentFlightSection"), duty=$("dutySectorsSection");
+    if(!section||!current||!duty)return;
+    if(showInbound)current.after(section); else duty.before(section);
+  }
+
   function renderCandidates(items,message="No flight or aircraft status found for the selected date and route.") {
     const el=$("candidates");
+    placeAutomaticMatch(!items.length&&Boolean(state.inboundAircraft));
     if (!items.length) { el.className="inbound-result"; el.innerHTML='<div class="empty inbound-empty">'+esc(message)+'</div>'+renderInboundAircraft(); return; }
     el.className="candidate-list";
     el.innerHTML=items.map((item,i)=>{
@@ -733,7 +740,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
+    state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.googleLinks=[]; placeAutomaticMatch(false); state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
     $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
     $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
     try {
