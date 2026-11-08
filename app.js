@@ -457,15 +457,14 @@
       :item.inboundHistory
       ?"The replacement aircraft was last observed close to "+item.destination+"; landing is not confirmed."
       :"The replacement aircraft is assigned to the next sector, but its live ADS-B position or landing time is not available.";
-    const boyText=item.difference!==null
-      ?item.difference===0
-        ?"THE BOY AND THE REPLACEMENT AIRCRAFT ARE LANDING AT ABOUT THE SAME TIME."
-        :"THE BOY IS LANDING "+Math.abs(item.difference)+" MINUTE"+(Math.abs(item.difference)===1?"":"S")+" "+(item.difference>0?"EARLIER":"LATER")+" THAN THE REPLACEMENT AIRCRAFT."
-      :item.boyLanding
+    const boyText=item.boyLanding
       ?"THE BOY LANDED AT "+item.destination+" · "+fmt(item.boyLanding.actual,ap.tz)+" · "+punctualityText(item.boyLanding.delayMinutes)
       :item.boyEta
       ?"THE BOY IS LANDING IN ABOUT "+item.boyEta.minutes+" MINUTES"
       :"The boy's landing at "+item.destination+" is not yet confirmed.";
+    const landingDifference=item.difference===null?null:item.difference===0
+      ?"SAME TIME"
+      :Math.abs(item.difference)+" MIN "+(item.difference>0?"EARLIER":"LATER");
     const status=item.mode==="live"?"LIVE ADS-B":inboundLanding?"LANDED":inboundEstimate?"ESTIMATED LANDING · DSP":item.inboundHistory?"NEAR AIRPORT · NOT CONFIRMED":"ASSIGNED · NO LIVE ADS-B";
     const inboundFlight=item.previousRow?'<div class="muted">Inbound sector: '+esc(item.previousRow.flightNumber||"Unknown flight")+' · '+esc(item.previousRow.origin||"?")+' → '+esc(item.destination)+'</div>':"";
     el.hidden=false;
@@ -477,7 +476,8 @@
       (inboundLanding?'<div class="stat"><small>Replacement landed · local</small><strong>'+esc(fmt(inboundLanding.actual,ap.tz))+'</strong></div><div class="stat"><small>Replacement landed</small><strong>'+esc(minutesAgoText(inboundLanding.actual))+'</strong></div>':inboundEstimate?'<div class="stat"><small>DSP estimated landing · local</small><strong>~'+esc(fmt(inboundEstimate.actual,ap.tz))+'</strong></div>':item.inboundEta?'<div class="stat"><small>Estimated landing</small><strong>'+esc(item.inboundEta.minutes)+' min · '+esc(fmt(item.inboundEta.eta,ap.tz))+'</strong></div>':"")+
       '<div class="stat"><small>Estimated departure · timetable</small><strong>'+esc(fmt(item.nextFlight.departure,airport(item.nextFlight.origin).tz))+'</strong></div>'+
       (item.boyLanding?'<div class="stat"><small>Boy landed · local</small><strong>'+esc(fmt(item.boyLanding.actual,ap.tz))+'</strong></div><div class="stat"><small>Boy punctuality</small><strong>'+esc(punctualityText(item.boyLanding.delayMinutes))+'</strong></div>':item.boyEta?'<div class="stat"><small>Boy estimated landing</small><strong>'+esc(item.boyEta.minutes)+' min</strong></div>':"")+
-      '</div><div class="notice">'+esc(inboundText)+' '+esc(boyText)+' The next-sector registration comes from the Nuremberg Airport board and is not airline-confirmed. ADS-B landing estimates are not confirmed touchdown times.</div>';
+      (landingDifference!==null?'<div class="stat"><small>Boy landing vs replacement</small><strong>'+esc(landingDifference)+'</strong></div>':"")+
+      '</div><div class="notice">'+esc(inboundText)+' '+(landingDifference===null?esc(boyText)+' ':"")+'The next-sector registration comes from the Nuremberg Airport board and is not airline-confirmed. ADS-B landing estimates are not confirmed touchdown times.</div>';
   }
   function nextRegFallback(item) { return item?.aircraft?.r||item?.nextFlight?.boardRegistration||"Registration unavailable"; }
   async function findInboundAircraft(targetFlights,registrationCache) {
