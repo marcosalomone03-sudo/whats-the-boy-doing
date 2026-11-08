@@ -352,6 +352,30 @@
     const minutes=Math.max(1,Math.round(distance/speed*60));
     return {eta:new Date(Date.now()+minutes*60000),minutes,distance,track,bearing:requiredBearing};
   }
+  async function observedArrivalForRegistration(registration,destination,referenceTime,cache=new Map()) {
+    const reg=String(registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    if(!reg||!airport(destination))return null;
+    const utcDay=referenceTime.toISOString().slice(0,10);
+    const previousDay=new Date(referenceTime.getTime()-86400000).toISOString().slice(0,10);
+    const days=[utcDay,previousDay];
+    const requests=await Promise.all(days.map(day=>{
+      const key=destination+"|"+day;
+      if(!cache.has(key))cache.set(key,get("/api/observed?airport="+encodeURIComponent(destination)+"&type=arrivals&date="+encodeURIComponent(day)));
+      return cache.get(key).catch(()=>null);
+    }));
+    const now=Date.now(), matches=[];
+    for(const data of requests)for(const flight of (Array.isArray(data?.flights)?data.flights:[])){
+      const flightReg=String(flight?.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      const arrival=flight?.to||{};
+      const airportCode=String(arrival.iata||"").toUpperCase();
+      const seen=String(arrival.seen||"").toLowerCase();
+      const time=Number(arrival.time)*1000;
+      if(flightReg!==reg||airportCode!==destination||!Number.isFinite(time)||time>now+10*60000||time<referenceTime.getTime()-12*3600000||!["ground","low"].includes(seen))continue;
+      matches.push({actual:new Date(time),scheduled:null,delayMinutes:null,flightNumber:String(flight.callsign||"").trim(),origin:String(flight.from?.iata||flight.from?.airport||"Unknown"),seen,source:"FlyItalyADSB observed-flight history"});
+    }
+    matches.sort((a,b)=>b.actual-a.actual);
+    return matches[0]||null;
+  }
   async function findAircraftChange(current,registrationCache) {
     state.aircraftChange=null;
     state.turnaround=null;
@@ -374,11 +398,12 @@
     const result=await identifyFlightByRegistration(next,registrationCache), ac=result.aircraft;
     const inboundEta=ac&&!ac.boardOnly?liveEtaToAirport(ac,destination,true):null;
     const previousRow=ac?.boardEvidence?.previousRow||null;
-    const inboundLanding=landingEvidenceFromRow(previousRow,destination);
+    let inboundLanding=landingEvidenceFromRow(previousRow,destination);
+    const inboundHistory=!inboundLanding&&!inboundEta?await observedArrivalForRegistration(nextReg,destination,current.flight.arrival,registrationCache):null;
     const boyTime=boyLanding?.actual||boyEta?.eta||null;
-    const inboundTime=inboundLanding?.actual||inboundEta?.eta||null;
+    const inboundTime=inboundLanding?.actual||inboundHistory?.actual||inboundEta?.eta||null;
     const difference=boyTime&&inboundTime?Math.round((inboundTime-boyTime)/60000):null;
-    state.aircraftChange={destination,nextFlight:next,aircraft:ac||{boardOnly:true,r:nextReg},inboundEta,boyEta,boyLanding,inboundLanding,previousRow,difference,mode:inboundLanding?"board-landed":inboundEta?"live":"assigned-only"};
+    state.aircraftChange={destination,nextFlight:next,aircraft:ac||{boardOnly:true,r:nextReg},inboundEta,boyEta,boyLanding,inboundLanding,inboundHistory,previousRow,difference,mode:inboundLanding?"board-landed":inboundHistory?"history-landed":inboundEta?"live":"assigned-only"};
     return state.aircraftChange;
   }
   function renderAircraftChange() {
@@ -388,10 +413,12 @@
     if(!item){el.hidden=true;return;}
     const ap=airport(item.destination), ac=item.aircraft, d=item.difference;
     const arrivalText=Number.isFinite(d)?(Math.abs(d)<=5?"Both aircraft are expected to land at about the same time.":d<0?"The other aircraft is expected to land "+Math.abs(d)+" minutes before the boy.":"The boy is expected to land "+d+" minutes before the other aircraft."):"Landing comparison is unavailable because one landing time has not been published.";
-    const status= item.mode==="live"?"LIVE ADS-B":item.mode==="board-landed"?"LANDED · AIRPORT BOARD":"ASSIGNED · NO LIVE ADS-B";
+    const status= item.mode==="live"?"LIVE ADS-B":item.mode==="board-landed"?"LANDED · AIRPORT BOARD":item.mode==="history-landed"?"ARRIVAL · ADS-B HISTORY":"ASSIGNED · NO LIVE ADS-B";
     const inboundLanding=item.inboundLanding;
     const inboundStats=inboundLanding?
       '<div class="stat"><small>Inbound aircraft landed · local</small><strong>'+esc(fmt(inboundLanding.actual,ap.tz))+'</strong></div><div class="stat"><small>Inbound landed</small><strong>'+esc(minutesAgoText(inboundLanding.actual))+'</strong></div><div class="stat"><small>Inbound punctuality</small><strong>'+esc(punctualityText(inboundLanding.delayMinutes))+'</strong></div>':
+      item.inboundHistory?
+      '<div class="stat"><small>Inbound arrival observed · local</small><strong>'+esc(fmt(item.inboundHistory.actual,ap.tz))+'</strong></div><div class="stat"><small>Observed at destination</small><strong>'+esc(minutesAgoText(item.inboundHistory.actual))+'</strong></div><div class="stat"><small>Arrival evidence</small><strong>'+esc(item.inboundHistory.seen==="ground"?"ON GROUND":"LOW · NEAR AIRPORT")+'</strong></div>':
       item.inboundEta?
       '<div class="stat"><small>Estimated arrival · '+esc(item.destination)+'</small><strong>'+esc(fmt(item.inboundEta.eta,ap.tz))+'</strong></div>':
       '<div class="stat"><small>Inbound arrival</small><strong>Not published</strong></div>';
@@ -408,7 +435,7 @@
       '<div class="stats"><div class="stat"><small>Registration</small><strong>'+esc(ac.r||nextRegFallback(item))+'</strong></div><div class="stat"><small>Aircraft type</small><strong>'+esc(ac.t||ac.boardRow?.aircraftType||"—")+'</strong></div>'+
       (item.mode==="live"?'<div class="stat"><small>Call sign · ADS-B</small><strong>'+esc((ac.flight||"").trim()||"Not broadcast")+'</strong></div><div class="stat"><small>Ground speed</small><strong>'+Math.round(numeric(ac.gs))+' kt</strong></div>':"")+
       inboundStats+boyStats+comparison+'</div>'+
-      '<div class="notice">'+(inboundLanding?"The assigned aircraft has already landed. Its landing time and punctuality are taken from the previous sector on the Nuremberg Airport board.":item.inboundEta?"The assigned aircraft is airborne and its live ADS-B track is consistent with a flight towards "+esc(item.destination)+".":"The next-sector registration is published by the Nuremberg Airport board, but no current ADS-B position or confirmed inbound landing time is available.")+
+      '<div class="notice">'+(inboundLanding?"The assigned aircraft has already landed. Its landing time and punctuality are taken from the previous sector on the Nuremberg Airport board.":item.inboundHistory?"The assigned aircraft was observed at "+esc(item.destination)+" by FlyItalyADSB flight history. Ground observations indicate it was on the surface; low observations indicate it was close to the airport, not a confirmed touchdown.":item.inboundEta?"The assigned aircraft is airborne and its live ADS-B track is consistent with a flight towards "+esc(item.destination)+".":"The next-sector registration is published by the Nuremberg Airport board, but no current ADS-B position or confirmed inbound landing time is available.")+
       ' The next-sector registration is an airport-board assignment and is not airline-confirmed. '+(item.mode==="live"?"Live ETA is a simple great-circle estimate; wind, routing and speed changes can alter it.":"")+'</div>';
   }
   function nextRegFallback(item) { return item?.aircraft?.r||item?.nextFlight?.boardRegistration||"Registration unavailable"; }
