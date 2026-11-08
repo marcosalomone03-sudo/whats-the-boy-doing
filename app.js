@@ -1051,6 +1051,8 @@
     const end=dateAtAirport(nextDate,"03:00",airport("NUE")).getTime();
     const routeSet=new Set(routes.map(pair=>pair.join("-")));
     const unique=new Map();
+    let inferredFromScheduleCount=0;
+    const scheduleRouteRows=state.flights.filter(f=>routeSet.has(f.origin+"-"+f.destination));
     for(const rawFlight of observed){
       let origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
       let from=rawFlight.from?{...rawFlight.from,iata:origin}:null;
@@ -1059,24 +1061,54 @@
       // NUE airport observations often contain only the endpoint seen by the
       // receiver. Recover the other airport from the historical NUE board,
       // matching registration and the observed NUE timestamp.
-      if((origin==="NUE"&&!destination)||(!origin&&destination==="NUE")){
+      if(!routeSet.has(origin+"-"+destination)){
         const reg=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-        const eventSeconds=origin==="NUE"?(from?.time??rawFlight.first_seen??rawFlight.last_seen):(to?.time??rawFlight.last_seen??rawFlight.first_seen);
-        const eventMs=Number(eventSeconds)*1000;
-        if(reg&&Number.isFinite(eventMs)){
-          const candidates=(state.dailyBoard?.flights||[]).filter(row=>{
-            const rowReg=String(row.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-            const pair=origin==="NUE"?[row.origin,row.destination]:[row.origin,row.destination];
-            return rowReg===reg&&routeSet.has(pair.join("-"))&&(origin==="NUE"?row.origin==="NUE":row.destination==="NUE");
-          }).map(row=>({row,time:Date.parse(row.scheduledTime||"")})).filter(item=>Number.isFinite(item.time)&&Math.abs(item.time-eventMs)<=4*3600000)
-            .sort((a,b)=>Math.abs(a.time-eventMs)-Math.abs(b.time-eventMs));
-          const match=candidates[0]?.row;
-          if(match){
-            origin=match.origin;
-            destination=match.destination;
-            from={...(from||{}),iata:origin,airport:from?.airport||"",time:from?.time??null};
-            to={...(to||{}),iata:destination,airport:to?.airport||"",time:to?.time??null};
+        const eventTimes=[from?.time,to?.time,rawFlight.first_seen,rawFlight.last_seen]
+          .map(value=>Number(value)*1000).filter(Number.isFinite);
+        const boardMatches=(state.dailyBoard?.flights||[]).filter(row=>{
+          const rowReg=String(row.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+          return reg&&rowReg===reg&&routeSet.has(row.origin+"-"+row.destination);
+        });
+        let inferred=null;
+        for(const eventMs of eventTimes){
+          const matches=boardMatches.map(row=>({origin:row.origin,destination:row.destination,time:Date.parse(row.scheduledTime||""),distance:Math.abs(Date.parse(row.scheduledTime||"")-eventMs)}))
+            .filter(item=>Number.isFinite(item.time)&&item.distance<=4*3600000)
+            .sort((a,b)=>a.distance-b.distance);
+          if(matches.length){inferred=matches[0];break;}
+        }
+        if(!inferred){
+          const candidates=[];
+          for(const f of scheduleRouteRows){
+            const checks=[];
+            if(f.destination==="NUE"&&(destination==="NUE"||!destination||origin==="NUE")){
+              const ms=Number(to?.time??rawFlight.last_seen??rawFlight.first_seen)*1000;
+              if(Number.isFinite(ms))checks.push({ms,target:f.arrival});
+            }
+            if(f.origin==="NUE"&&(origin==="NUE"||!origin||destination==="NUE")){
+              const ms=Number(from?.time??rawFlight.first_seen??rawFlight.last_seen)*1000;
+              if(Number.isFinite(ms))checks.push({ms,target:f.departure});
+            }
+            if(origin==="NUE"&&destination==="NUE"){
+              for(const ms of eventTimes){
+                if(f.origin==="NUE")checks.push({ms,target:f.departure});
+                if(f.destination==="NUE")checks.push({ms,target:f.arrival});
+              }
+            }
+            for(const check of checks){
+              const targetMs=check.target instanceof Date?check.target.getTime():Date.parse(check.target);
+              if(Number.isFinite(targetMs)&&Math.abs(check.ms-targetMs)<=4*3600000)
+                candidates.push({origin:f.origin,destination:f.destination,time:targetMs,distance:Math.abs(check.ms-targetMs)});
+            }
           }
+          candidates.sort((a,b)=>a.distance-b.distance);
+          if(candidates.length)inferred=candidates[0];
+        }
+        if(inferred){
+          origin=inferred.origin;
+          destination=inferred.destination;
+          inferredFromScheduleCount++;
+          from={...(from||{}),iata:origin,airport:from?.airport||"",time:from?.time??null};
+          to={...(to||{}),iata:destination,airport:to?.airport||"",time:to?.time??null};
         }
       }
 
@@ -1119,6 +1151,7 @@
       scheduleErrors.length?"Some timetable requests were unavailable: "+scheduleErrors.join(", "):"",
       !boardResult?"The historical NUE airport board was unavailable; timetable matching may be incomplete.":"",
       "FlyItalyADSB airports queried: "+observedAirports.join(", ")+". Airport API records: "+rawObservedCount+" · route matches: "+routeMatchCount+" · duty-window matches: "+windowMatchCount+".",
+      "Historical matching diagnostics: "+scheduleRouteRows.length+" timetable sectors · "+(state.dailyBoard?.flights?.length||0)+" NUE board rows · "+inferredFromScheduleCount+" incomplete ADS-B routes inferred.",
       !windowMatchCount&&rawObservedCount?"Sample observed routes: "+[...new Set(routeSamples)].join(", "):""
     ].filter(Boolean).join(" ");
     renderHistoricalDuty(rows,date,coverageMessage);
