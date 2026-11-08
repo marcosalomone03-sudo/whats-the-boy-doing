@@ -646,9 +646,10 @@
       if(ac.boardOnly){
         const row=ac.boardRow||{},ev=ac.boardEvidence||{};
         const time=x=>x?.scheduledLocalTime||x?.statusTimeLocal||"time unavailable";
-        const previous=ev.previousRow?(`PREVIOUS: ${ev.previousRow.flightNumber} ${ev.previousRow.origin}→${ev.previousRow.destination} · ${time(ev.previousRow)} · ${ev.previousRow.status||"status unavailable"}`):"";
-        const next=ev.nextRow?(`NEXT: ${ev.nextRow.flightNumber} ${ev.nextRow.origin}→${ev.nextRow.destination} · ${time(ev.nextRow)} · ${ev.nextRow.status||"status unavailable"}`):"";
-        const boardStatus=[row.status||"Status unavailable",row.statusTimeLocal?"status time "+row.statusTimeLocal:"",row.scheduledLocalTime?"scheduled "+row.scheduledLocalTime:""].filter(Boolean).join(" · ");
+        const delay=x=>Number.isFinite(x?.delayMinutes)?(Math.abs(x.delayMinutes)<=5?"ON TIME":x.delayMinutes>0?x.delayMinutes+" min late":Math.abs(x.delayMinutes)+" min early"):"";
+        const previous=ev.previousRow?(`PREVIOUS: ${ev.previousRow.flightNumber} ${ev.previousRow.origin}→${ev.previousRow.destination} · ${time(ev.previousRow)} · ${ev.previousRow.status||"status unavailable"} ${delay(ev.previousRow)}`):"";
+        const next=ev.nextRow?(`NEXT: ${ev.nextRow.flightNumber} ${ev.nextRow.origin}→${ev.nextRow.destination} · ${time(ev.nextRow)} · ${ev.nextRow.status||"status unavailable"} ${delay(ev.nextRow)}`):"";
+        const boardStatus=[row.status||"Status unavailable",row.statusTimeLocal?"event time "+row.statusTimeLocal:"",row.scheduledLocalTime?"scheduled "+row.scheduledLocalTime:"",delay(row)].filter(Boolean).join(" · ");
         const swap=ev.destinationSwap?"<br>Different registration assigned to the opposite-direction sector: "+esc(ev.oppositeFlight)+" · "+esc(ev.oppositeRegistration):"";
         return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${esc(dep)} · ARR ${esc(arr)}</small></div><span class="status none">AIRPORT BOARD ONLY</span></div><small>BOARD REGISTRATION: ${esc(ac.r||row.registration||"Not published")} · BOARD STATUS: ${esc(boardStatus)}<br>ADS-B: ${esc(ac.boardReason)}<br>${esc(previous)}<br>${esc(next)}${swap}<br>Source: Nuremberg Airport. No live aircraft position is being claimed.</small></div>`;
       }
