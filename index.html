@@ -19,28 +19,28 @@
 </style>
 </head>
 <body><div class="app">
-<header><div class="brand"><div class="mark">✈</div><div><h1>What's the boy doing?</h1><div class="sub">Personal flight operations tracker</div></div></div><div class="pill">FREE · V27</div></header>
+<header><div class="brand"><div class="mark">✈</div><div><h1>What's the boy doing?</h1><div class="sub">Personal flight operations tracker</div></div></div><div class="pill">FREE · V28</div></header>
 
-<section class="hero"><div class="eyebrow">Your duty, decoded</div><div class="formrow">
+<section class="hero"><div class="eyebrow">The Boy's duty, decoded</div><div class="formrow">
 <div><label for="route">DUTY ROUTE</label><input id="route" class="code" maxlength="7" value="BUD-ALC" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BUD-ALC"></div>
 <div><label for="flightDate">DUTY DATE</label><input id="flightDate" type="date"></div></div>
 <div class="hint">Enter one airport code (BUD), two destination codes (BUD-ALC), or an exact route (VLC-NUE).</div>
 <button id="track" class="primary">LOAD DUTY & FIND FLIGHTS ↗</button>
-<div class="statusline"><span class="dot"></span><span id="connection">Waiting for setup · Worker URL required</span></div><div id="error" class="error"></div></section><section id="currentFlightSection" class="section"><div class="sectionhead"><h2>Current flight</h2><span class="pill" id="lastUpdated">NOT STARTED</span></div><div id="current" class="empty">Load your duty to see scheduled sectors.</div></section>
-<section id="aircraftChangeSection" class="section" hidden><div class="sectionhead"><h2>Aircraft change</h2><span class="pill">LIVE REGISTRATION + ADS-B</span></div><div id="aircraftChangeContent"></div></section>
-<section class="section"><div class="sectionhead"><h2>Next takeoff</h2><span class="pill">SCHEDULED</span></div><div id="nextFlight" class="empty">The next scheduled sector will appear here.</div></section>
+<div class="statusline"><span class="dot"></span><span id="connection">Waiting for setup · Worker URL required</span></div><div id="error" class="error"></div></section><section id="currentFlightSection" class="section"><div class="sectionhead"><h2>The Boy's flight</h2><span class="pill" id="lastUpdated">NOT STARTED</span></div><div id="current" class="empty">Load your duty to see scheduled sectors.</div></section>
+<section id="aircraftChangeSection" class="section" hidden><div class="sectionhead"><h2>The Boy's aircraft change</h2><span class="pill">LIVE REGISTRATION + ADS-B</span></div><div id="aircraftChangeContent"></div></section>
+<section class="section"><div class="sectionhead"><h2>The Boy's next takeoff</h2><span class="pill">SCHEDULED</span></div><div id="nextFlight" class="empty">The next scheduled sector will appear here.</div></section>
 
 
 
 
 
 
-<section id="dutySectorsSection" class="section"><div class="sectionhead"><h2>Duty sectors</h2><span class="pill" id="sectorCount">0 SECTORS</span></div><div id="sectors" class="flightlist"><div class="empty">No timetable loaded.</div></div><div class="notice">Times are local to each airport. ADS-B data is observational, not an airline operational feed. Exact touchdown, takeoff and delay are not inferred from a single position.</div></section>
+<section id="dutySectorsSection" class="section"><div class="sectionhead"><h2>The Boy's sectors</h2><span class="pill" id="sectorCount">0 SECTORS</span></div><div id="sectors" class="flightlist"><div class="empty">No timetable loaded.</div></div><div class="notice">Times are local to each airport. ADS-B data is observational, not an airline operational feed. Exact touchdown, takeoff and delay are not inferred from a single position.</div></section>
 
-<section id="automaticFlightMatch" class="section"><div class="sectionhead"><h2>Automatic flight match</h2><span class="pill">BOARD REGISTRATION + LIVE ADS-B</span></div><div id="candidates" class="empty">Waiting for the NUE airport board registration and a fresh ADS-B response.</div><div class="notice">The flight is matched using the aircraft registration published by the Nuremberg Airport board, then queried directly against live ADS-B data. The active flight is selected automatically using its scheduled time window and the aircraft live airborne or ground status. If your selected flight has not started, its assigned aircraft may be shown separately on its current inbound sector. This is observational data, not an airline-confirmed assignment.</div></section>
+<section id="automaticFlightMatch" class="section"><div class="sectionhead"><h2>The Boy's flight match</h2><span class="pill">BOARD REGISTRATION + LIVE ADS-B</span></div><div id="candidates" class="empty">Waiting for the NUE airport board registration and a fresh ADS-B response.</div><div class="notice">The flight is matched using the aircraft registration published by the Nuremberg Airport board, then queried directly against live ADS-B data. The active flight is selected automatically using its scheduled time window and the aircraft live airborne or ground status. If your selected flight has not started, its assigned aircraft may be shown separately on its current inbound sector. This is observational data, not an airline-confirmed assignment.</div></section>
 
 
 
-<section class="section"><div class="sectionhead"><h2>Last observed flight</h2><span class="pill">THIS DEVICE</span></div><div id="lastFlight" class="empty">No aircraft selected on this device yet.</div></section>
+<section class="section"><div class="sectionhead"><h2>The Boy's last observed flight</h2><span class="pill">THIS DEVICE</span></div><div id="lastFlight" class="empty">No aircraft selected on this device yet.</div></section>
 <div class="footer"><a class="source" href="https://flyitalyadsb.com/en/data/api/docs/" target="_blank" rel="noopener">FlyItalyADSB API</a><a class="source" href="https://api.adsb.lol/docs" target="_blank" rel="noopener">ADSB.lol API</a><a class="source" href="https://github.com/adsbfi/opendata" target="_blank" rel="noopener">ADSB.fi open data</a><a class="source" href="https://www.ryanair.com" target="_blank" rel="noopener">Ryanair schedules</a><div style="margin-top:8px">Independent personal tool · Not affiliated with Ryanair</div></div>
 </div><script src="./config.js"></script><script src="./app.js"></script></body></html>
