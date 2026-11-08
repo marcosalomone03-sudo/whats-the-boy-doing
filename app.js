@@ -787,15 +787,14 @@
       else if(difference<0)punctualityLabel=minuteWords(Math.abs(difference))+" EARLY";
       else {punctualityLabel=minuteWords(difference)+" LATE";punctualityClass="late";}
     }
-    return `<div class="flighttop"><div><div style="display:flex;align-items:center;gap:9px"><span style="font-size:30px;line-height:1" aria-label="${esc(phase.label)}">${phase.icon}</span><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="muted" style="font-weight:700;letter-spacing:.08em">${esc(phase.label)}</div></div></div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><div class="status-stack"><span class="status ${statusClass}">${status}</span>${punctualityLabel?`<span class="status ${punctualityClass}">${esc(punctualityLabel)}</span>`:""}</div></div><div class="notice">${ac.boardEvidence?"DAILY BOARD REGISTRATION MATCH — "+esc(ac.boardEvidence.registration)+". ":""}Live ADS-B reports the aircraft ${onGround?(taxiing?"on the surface and moving at "+Math.round(speed||0)+" kt":"on the surface"):"airborne"}. Registration and HEX are read from the transponder feed. The airport board assignment is not airline-confirmed.</div>
-      <div class="stats">
+    return `<div class="flighttop"><div><div style="display:flex;align-items:center;gap:9px"><span style="font-size:30px;line-height:1" aria-label="${esc(phase.label)}">${phase.icon}</span><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="muted" style="font-weight:700;letter-spacing:.08em">${esc(phase.label)}</div></div></div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><div class="status-stack"><span class="status ${statusClass}">${status}</span>${punctualityLabel?`<span class="status ${punctualityClass}">${esc(punctualityLabel)}</span>`:""}</div></div><div class="stats">
         <div class="stat"><small>Call sign · ADS-B</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
         <div class="stat"><small>Registration</small><strong>${esc(ac.r)}</strong></div>
         <div class="stat"><small>Aircraft type</small><strong>${esc(ac.t)}</strong></div>
         <div class="stat"><small>Ground speed</small><strong>${speed===null?"—":Math.round(speed)+" kt"}</strong></div>
         <div class="stat"><small>Altitude</small><strong>${onGround?"GROUND":altitude===null?"—":Math.round(altitude).toLocaleString()+" ft"}</strong></div>
         <div class="stat"><small>ESTIMATED ARRIVAL · LOCAL</small><strong>${esc(etaLabel)}</strong></div><div class="stat"><small>LANDING IN · EST.</small><strong>${etaMinutes===null?"—":etaMinutes+" min"}</strong></div>
-      </div><div class="notice">ETA is a simple live estimate from remaining great-circle distance and current ground speed; wind, routing and speed changes can alter it. ADS-B position age: ${Math.round(positionAge(ac))} seconds.</div>`;
+      </div>`;
   }
   function renderTurnaround(flight,item) {
     const ap=airport(item.destination), landing=item.landing;
