@@ -585,7 +585,7 @@
         const badgeClass=/cancel|divert|delay|late/i.test(inferred)?"ground":actual?"air":"none";
         const eventLabel=actual?(isArrival?"ACTUAL ARRIVAL":"ACTUAL DEPARTURE"):estimated?(isArrival?"EST. ARRIVAL":"EST. DEPARTURE"):"SCHEDULED";
         const registration=plain(f.boardRegistration),aircraftType=plain(f.boardAircraftType);
-        const meta=[eventLabel,eventTime,deltaText,registration,aircraftType].filter(Boolean).join(" · ");
+        const meta=[eventLabel,eventTime,isArrival?"":deltaText,registration,aircraftType].filter(Boolean).join(" · ");
         return `<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(meta)} · ${esc(f.source||"Nuremberg Airport")}</small></div><span class="status ${badgeClass}">${esc(inferred)}</span></div>`;
       });
       historyEl.innerHTML=history.length?history.join(""):`<div class="empty">No flight records returned for this route and date.</div>`;
@@ -646,8 +646,8 @@
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
     state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[];
-    $("observedFlights").textContent="Airport arrival checks are disabled: the app never queries future observations.";
-    $("candidates").className="empty"; $("candidates").textContent="Searching timetable and current ADS-B positions…";
+
+    $("candidates").className="empty"; $("candidates").textContent="Checking whether an aircraft can be linked to an inbound NUE arrival and the next outbound departure…";
     $("connection").textContent="Checking timetable…"; $("lastUpdated").textContent="SEARCHING";
     try {
       const responses=await Promise.allSettled(routes.map(([o,d])=>loadRoute(o,d,date)));
