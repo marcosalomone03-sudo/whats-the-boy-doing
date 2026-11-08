@@ -1066,7 +1066,7 @@
     // and do not count every unrelated NUE movement.
     for(const rawFlight of observed){
       trace.records++;
-      if(rawSamples.length<5)rawSamples.push({from:rawFlight?.from,to:rawFlight?.to,r:rawFlight?.r,icao:rawFlight?.icao,first_seen:rawFlight?.first_seen,last_seen:rawFlight?.last_seen});
+      if(rawSamples.length<5)rawSamples.push({from:rawFlight?.from,to:rawFlight?.to,r:rawFlight?.r,icao:rawFlight?.icao,callsign:rawFlight?.callsign,first_seen:rawFlight?.first_seen,last_seen:rawFlight?.last_seen});
       let inferredThisRecordFromSchedule=false;
       let origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
       let from=rawFlight.from?{...rawFlight.from,iata:origin}:null;
@@ -1189,11 +1189,24 @@
     // exact route entered by the user. The selected registration becomes the
     // key for the complete daily aircraft-flight log.
     const candidateAircraft=new Map();
+    const candidateTrace={exactRoute:0,ryanairCallsign:0,registration:0,icao:0,accepted:0,otherCallsigns:[]};
     for(const row of candidateRows){
       const routeKey=row.origin+"-"+row.destination;
       const registration=String(row.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const icao=String(row.observed?.icao||"").toLowerCase();
-      if(!routeSet.has(routeKey)||!/^RYR/i.test(row.callsign)||!registration||!/^[0-9a-f]{6}$/.test(icao))continue;
+      if(!routeSet.has(routeKey))continue;
+      candidateTrace.exactRoute++;
+      if(!/^RYR/i.test(row.callsign)){
+        const other=String(row.callsign||"(missing)");
+        if(candidateTrace.otherCallsigns.length<12&&!candidateTrace.otherCallsigns.includes(other))candidateTrace.otherCallsigns.push(other);
+        continue;
+      }
+      candidateTrace.ryanairCallsign++;
+      if(!registration)continue;
+      candidateTrace.registration++;
+      if(!/^[0-9a-f]{6}$/.test(icao))continue;
+      candidateTrace.icao++;
+      candidateTrace.accepted++;
       const key=registration+"|"+icao;
       const previous=candidateAircraft.get(key);
       const time=(row.departure||row.arrival)?.getTime()||Infinity;
@@ -1218,6 +1231,8 @@
       "NUE board entries: "+(state.dailyBoard?.flights||[]).map(row=>[row.flightNumber,row.origin+"-"+row.destination,row.registration||"REG N/A",row.scheduledTime||row.scheduledLocalTime||"TIME N/A"].join(" ")).join(" | "),
       "Schedule requests: "+(state.scheduleDiagnostics||[]).map(item=>[item.route,item.date,item.source||"source",item.count??item.flightCount??item.returned??"no count"].join(" ")).join(" | "),
       !windowMatchCount&&rawObservedCount?"Sample observed routes: "+[...new Set(routeSamples)].join(", "):"",
+      "Exact-route observed records: "+candidateTrace.exactRoute+" · RYR callsigns: "+candidateTrace.ryanairCallsign+" · with registration: "+candidateTrace.registration+" · valid ICAO hex: "+candidateTrace.icao+" · accepted before aircraft deduplication: "+candidateTrace.accepted+".",
+      "Other exact-route callsigns: "+candidateTrace.otherCallsigns.join(", "),
       "Ryanair aircraft candidates on the entered route: "+historicalCandidates.length+" (maximum 3)."
     ].filter(Boolean).join(" ");
     renderHistoricalCandidatePicker(historicalCandidates,date,coverageMessage);
