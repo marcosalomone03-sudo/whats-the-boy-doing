@@ -928,6 +928,150 @@
     $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST AUTO-MATCHED FLIGHT</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
   }
 
+
+  function offsetCalendarDay(ds,offset) {
+    const [y,m,d]=ds.split("-").map(Number);
+    const x=new Date(Date.UTC(y,m-1,d+offset));
+    return [x.getUTCFullYear(),String(x.getUTCMonth()+1).padStart(2,"0"),String(x.getUTCDate()).padStart(2,"0")].join("-");
+  }
+  function historicalSeenLabel(value) {
+    const seen=String(value||"").toLowerCase();
+    return seen==="ground"?"GROUND OBSERVATION":seen==="low"?"LOW-ALTITUDE OBSERVATION":seen==="approach"?"APPROACH OBSERVATION":"NOT OBSERVED";
+  }
+  function historicalDelayText(delay) {
+    if(!Number.isFinite(delay))return "PUNCTUALITY UNAVAILABLE";
+    if(Math.abs(delay)<=5)return "ON TIME";
+    return Math.abs(delay)+" MIN "+(delay<0?"EARLY":"LATE");
+  }
+  function historicalScheduleMatch(observed) {
+    const reg=String(observed.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    const depMs=Number(observed.from?.time)*1000;
+    const arrMs=Number(observed.to?.time)*1000;
+    const routeFlights=state.flights.filter(f=>f.origin===observed.from?.iata&&f.destination===observed.to?.iata);
+    if(!routeFlights.length)return null;
+    const boardRows=(state.dailyBoard?.flights||[]).filter(row=>row.origin===observed.from?.iata&&row.destination===observed.to?.iata&&reg&&String(row.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"")===reg);
+    let targetMs=Number.isFinite(depMs)?depMs:arrMs;
+    if(boardRows.length){
+      const board=boardRows.map(row=>({row,time:Date.parse(row.scheduledTime||"")})).filter(x=>Number.isFinite(x.time))
+        .sort((a,b)=>Math.abs(a.time-targetMs)-Math.abs(b.time-targetMs))[0];
+      if(board&&Math.abs(board.time-targetMs)<=4*3600000){
+        const scheduled=routeFlights.map(f=>({flight:f,distance:Math.abs(f.departure.getTime()-board.time)})).sort((a,b)=>a.distance-b.distance)[0];
+        if(scheduled&&scheduled.distance<=4*3600000)return {flight:scheduled.flight,board:board.row};
+      }
+    }
+    const nearest=routeFlights.map(f=>({flight:f,distance:Math.min(Number.isFinite(depMs)?Math.abs(f.departure.getTime()-depMs):Infinity,Number.isFinite(arrMs)?Math.abs(f.arrival.getTime()-arrMs):Infinity)}))
+      .sort((a,b)=>a.distance-b.distance)[0];
+    return nearest&&nearest.distance<=4*3600000?{flight:nearest.flight,board:null}:null;
+  }
+  function renderHistoricalDuty(rows,date,coverageMessage="") {
+    const complete=rows.filter(x=>x.arrival);
+    const punctual=rows.filter(x=>Number.isFinite(x.delayMinutes));
+    const changes=rows.filter(x=>x.nextOperation==="AIRCRAFT CHANGE").length;
+    const turnarounds=rows.filter(x=>x.nextOperation==="TURNAROUND").length;
+    $("current").innerHTML='<div class="stats">'+
+      '<div class="stat"><small>Observed sectors</small><strong>'+rows.length+'</strong></div>'+
+      '<div class="stat"><small>Arrivals observed</small><strong>'+complete.length+'</strong></div>'+
+      '<div class="stat"><small>On-time result</small><strong>'+ (punctual.length?punctual.filter(x=>Math.abs(x.delayMinutes)<=5).length+'/'+punctual.length:'—') +'</strong></div>'+
+      '<div class="stat"><small>Aircraft changes · turnarounds</small><strong>'+changes+' · '+turnarounds+'</strong></div>'+
+      '</div><div class="notice">HISTORICAL DUTY · '+esc(date)+' · Reconstructed from FlyItalyADSB observed flights and the available Nuremberg timetable. These are receiver observations, not airline operational records.</div>';
+    $("nextFlight").innerHTML='<div class="empty"><strong>HISTORICAL DUTY COMPLETE</strong><br>'+rows.length+' observed sector(s) reconstructed for '+esc(date)+'.</div>';
+    $("aircraftChangeSection").hidden=true;
+    $("sectorCount").textContent=rows.length+" OBSERVED SECTORS";
+    if(!rows.length){
+      $("sectors").innerHTML='<div class="empty">No matching observed sectors were returned for this duty date. This does not prove the flights did not operate.</div>';
+    }else{
+      $("sectors").innerHTML=rows.map((item,index)=>{
+        const f=item.schedule, o=item.observed;
+        const fromTime=item.departure?fmt(item.departure,airport(item.origin).tz):"—";
+        const toTime=item.arrival?fmt(item.arrival,airport(item.destination).tz):"—";
+        const scheduledDep=f?fmt(f.departure,airport(item.origin).tz):"—";
+        const scheduledArr=f?fmt(f.arrival,airport(item.destination).tz):"—";
+        const delay=item.delayMinutes;
+        const status=item.arrival?historicalSeenLabel(o.to?.seen):"ARRIVAL NOT OBSERVED";
+        const reg=item.registration||"REGISTRATION UNAVAILABLE";
+        const aircraft=item.type||"TYPE UNAVAILABLE";
+        const operation=item.nextOperation?'<div class="notice">'+esc(item.nextOperation)+(item.nextRegistration?" · "+esc(item.nextRegistration):"")+'</div>':"";
+        return '<div class="candidate"><div class="flighttop"><div><b>'+esc(item.flightNumber)+' · '+esc(item.origin)+' → '+esc(item.destination)+'</b><small>'+esc(item.callsign||"Callsign unavailable")+' · '+esc(reg)+' · '+esc(aircraft)+'</small></div><span class="status '+(item.arrival?"ground":"none")+'">'+esc(status)+'</span></div>'+
+          '<div class="stats"><div class="stat"><small>Observed departure · local</small><strong>'+esc(fromTime)+'</strong><small>'+esc(historicalSeenLabel(o.from?.seen))+'</small></div>'+
+          '<div class="stat"><small>Observed arrival · local</small><strong>'+esc(toTime)+'</strong><small>'+esc(historicalSeenLabel(o.to?.seen))+'</small></div>'+
+          '<div class="stat"><small>Scheduled departure · local</small><strong>'+esc(scheduledDep)+'</strong></div>'+
+          '<div class="stat"><small>Scheduled arrival · local</small><strong>'+esc(scheduledArr)+'</strong></div></div>'+
+          '<div class="notice">'+esc(f?"THE BOY IS "+historicalDelayText(delay):"PUNCTUALITY UNAVAILABLE · NO MATCHING SCHEDULE")+
+          (item.arrival?" · Arrival event observed by ADS-B; this is not a guaranteed touchdown time.":" · The arrival airport event was not observed.")+
+          (item.board?" · Registration corroborated by NUE airport board.":"")+'</div>'+operation+'</div>';
+      }).join("");
+    }
+    $("candidates").className="empty";
+    $("candidates").textContent=coverageMessage||"Historical mode · live aircraft positions are intentionally disabled for past dates.";
+    $("connection").textContent="Historical observed-flight data loaded · live tracking disabled";
+    $("lastUpdated").textContent="HISTORICAL · "+date;
+    $("lastFlight").innerHTML='<div class="empty">Historical searches do not change the saved live aircraft match on this device.</div>';
+  }
+  async function runHistoricalDuty(route,date,routes) {
+    const nextDate=addCalendarDay(date);
+    const scheduleJobs=routes.flatMap(([origin,destination])=>[date,nextDate].map(day=>({origin,destination,date:day})));
+    const airportDates=[date,nextDate];
+    const observedJobs=airportDates.flatMap(day=>["arrivals","departures"].map(type=>({day,type})));
+    const [scheduleResults,boardResult,observedResults]=await Promise.all([
+      Promise.allSettled(scheduleJobs.map(job=>loadRoute(job.origin,job.destination,job.date))),
+      loadDailyBoard(date).catch(error=>{console.warn("Historical NUE board unavailable",error);return null;}),
+      Promise.allSettled(observedJobs.map(job=>get("/api/observed?airport=NUE&type="+job.type+"&date="+encodeURIComponent(job.day))))
+    ]);
+    const scheduleErrors=[];
+    scheduleResults.forEach((result,index)=>{
+      if(result.status==="fulfilled")state.flights.push(...result.value);
+      else scheduleErrors.push(scheduleJobs[index].origin+"-"+scheduleJobs[index].destination+" · "+scheduleJobs[index].date);
+    });
+    state.flights=state.flights.filter(f=>inOperationalWindow(f,date)).sort((a,b)=>a.departure-b.departure);
+    const observed=[],errors=[];
+    observedResults.forEach((result,index)=>{
+      if(result.status!=="fulfilled"){errors.push(observedJobs[index].day+" "+observedJobs[index].type);return;}
+      const flights=Array.isArray(result.value?.flights)?result.value.flights:[];
+      observed.push(...flights);
+    });
+    const start=dateAtAirport(date,"03:00",airport("NUE")).getTime();
+    const end=dateAtAirport(nextDate,"03:00",airport("NUE")).getTime();
+    const routeSet=new Set(routes.map(pair=>pair.join("-")));
+    const unique=new Map();
+    for(const flight of observed){
+      const origin=String(flight?.from?.iata||"").toUpperCase(),destination=String(flight?.to?.iata||"").toUpperCase();
+      if(!routeSet.has(origin+"-"+destination))continue;
+      const dep=Number(flight.from?.time)*1000,arr=Number(flight.to?.time)*1000;
+      const anchor=origin==="NUE"?(Number.isFinite(dep)?dep:arr):(Number.isFinite(arr)?arr:dep);
+      if(!Number.isFinite(anchor)||anchor<start||anchor>=end)continue;
+      const key=[flight.icao||"",origin,destination,Number.isFinite(dep)?dep:"",Number.isFinite(arr)?arr:""].join("|");
+      unique.set(key,flight);
+    }
+    const rows=[...unique.values()].map(observedFlight=>{
+      const scheduleMatch=historicalScheduleMatch(observedFlight);
+      const schedule=scheduleMatch?.flight||null;
+      const departure=Number.isFinite(Number(observedFlight.from?.time))?new Date(Number(observedFlight.from.time)*1000):null;
+      const arrival=Number.isFinite(Number(observedFlight.to?.time))?new Date(Number(observedFlight.to.time)*1000):null;
+      const delayMinutes=arrival&&schedule?Math.round((arrival.getTime()-schedule.arrival.getTime())/60000):null;
+      return {observed:observedFlight,schedule,board:scheduleMatch?.board||null,origin:String(observedFlight.from?.iata||"").toUpperCase(),destination:String(observedFlight.to?.iata||"").toUpperCase(),
+        departure,arrival,delayMinutes,registration:String(observedFlight.r||"").trim(),type:String(observedFlight.t||"").trim(),
+        callsign:String(observedFlight.callsign||"").trim(),flightNumber:schedule?.flightNumber||String(observedFlight.callsign||"").trim()||"OBSERVED FLIGHT"};
+    }).sort((a,b)=>(a.departure?.getTime()||a.arrival?.getTime()||0)-(b.departure?.getTime()||b.arrival?.getTime()||0));
+    for(let i=0;i<rows.length-1;i++){
+      const current=rows[i],next=rows[i+1];
+      if(current.destination!==next.origin)continue;
+      if(current.registration&&next.registration){
+        current.nextOperation=current.registration===next.registration?"TURNAROUND":"AIRCRAFT CHANGE";
+        current.nextRegistration=next.registration===current.registration?"SAME AIRCRAFT":next.registration;
+      }else current.nextOperation="TURNAROUND / AIRCRAFT CHANGE · REGISTRATION UNAVAILABLE";
+    }
+    state.candidates=[];state.selected=null;state.aircraftChange=null;state.turnaround=null;state.inboundAircraft=null;state.dayFinished=false;
+    const coverage=observedResults.map((result,index)=>result.status==="fulfilled"?(result.value?.coverage?.missing||[]):[]).flat();
+    const coverageMessage=[
+      "HISTORICAL MODE · observed-flight records are reconstructed from receiver data; airport coverage can be incomplete.",
+      coverage.length?"Missing observed-data days: "+[...new Set(coverage)].join(", "):"",
+      errors.length?"Some observed-flight requests failed: "+errors.join(", "):"",
+      scheduleErrors.length?"Some timetable requests were unavailable: "+scheduleErrors.join(", "):"",
+      !boardResult?"The historical NUE airport board was unavailable; timetable matching may be incomplete.":""
+    ].filter(Boolean).join(" ");
+    renderHistoricalDuty(rows,date,coverageMessage);
+  }
+
   function historyAirportStamp(event) {
     if(!event||!Number.isFinite(Number(event.time)))return "time unavailable";
     const code=String(event.iata||event.airport||"").toUpperCase();
@@ -1221,12 +1365,15 @@
     const routes=routesFor(route);
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
+    const minDate=offsetCalendarDay(today,-7);
+    if(date<minDate||date>today){showError("Historical searches are available for today and the previous seven calendar days only.");return;}
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
     state.dayFinished=false;
     state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; state.turnaround=null; renderAircraftChange(); state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null; state.registrationHistory=[]; renderAircraftHistory();
     $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
     $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
     try {
+      if(date!==today){await runHistoricalDuty(route,date,routes);return;}
       const nextDate=addCalendarDay(date);
       const boardResult=await loadDailyBoard(date).catch(error=>{console.warn("Daily NUE board unavailable",error);return null;});
       const routeJobs=routes.flatMap(([o,d])=>[date,nextDate].map(day=>({route:[o,d],date:day})));
