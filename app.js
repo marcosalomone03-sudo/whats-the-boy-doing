@@ -1232,13 +1232,14 @@
         const candidates=Array.isArray(result.value?.candidates)?result.value.candidates:[];
         routeHistoryCount+=candidates.length;
         for(const item of candidates){
-          const callsign=String(item.callsign||"").trim().toUpperCase();
-          if(!/^RYR/.test(callsign))continue;
+          // The endpoint is queried by route. Its callsign grouping is ignored:
+          // registration + ICAO hex are the only aircraft identity fields used.
           for(const aircraft of (Array.isArray(item.aircraft)?item.aircraft:[])){
             const registration=String(aircraft?.r||"").trim().toUpperCase();
+            const icao=String(aircraft?.icao||aircraft?.hex||"").trim().toLowerCase();
             if(!registration||!/[A-Z]/.test(registration)||!/[0-9]/.test(registration)||/^[0-9A-F]{6}$/.test(registration.replace(/[^A-Z0-9]/g,"")))continue;
             const key=registration.replace(/[^A-Z0-9]/g,"");
-            if(!routeCalls.has(key))routeCalls.set(key,{registration,callsign,type:String(aircraft.t||""),origin:routes[index][0],destination:routes[index][1],flights:Number(item.flights)||0});
+            if(!routeCalls.has(key))routeCalls.set(key,{registration,icao,type:String(aircraft.t||""),origin:routes[index][0],destination:routes[index][1],flights:Number(item.flights)||0});
           }
         }
       });
@@ -1259,11 +1260,11 @@
         const observed={...match.flight,from:{...match.flight.from,iata:match.origin},to:{...match.flight.to,iata:match.destination}};
         const scheduleMatch=historicalScheduleMatch(observed);
         const seed={observed,schedule:scheduleMatch?.flight||null,origin:match.origin,destination:match.destination,departure:match.dep,arrival:match.arr,
-          flightNumber:scheduleMatch?.flight?.flightNumber||item.callsign};
-        return {registration:item.registration,icao:String(match.flight.icao||"").toLowerCase(),type:String(match.flight.t||item.type||""),callsign:String(match.flight.callsign||item.callsign),seed};
+          flightNumber:scheduleMatch?.flight?.flightNumber||"OBSERVED FLIGHT"};
+        return {registration:item.registration,icao:String(match.flight.icao||item.icao||"").toLowerCase(),type:String(match.flight.t||item.type||""),callsign:String(match.flight.callsign||""),seed};
       }));
       historicalCandidates=verified.filter(result=>result.status==="fulfilled"&&result.value).map(result=>result.value).slice(0,3);
-      routeHistoryDiagnostics=" Route-history index: "+routeHistoryCount+" callsigns; Ryanair registrations checked: "+routeAircraft.length+"; exact-date route registrations verified: "+historicalCandidates.length+".";
+      routeHistoryDiagnostics=" Route-history route records: "+routeHistoryCount+"; registrations checked: "+routeAircraft.length+"; exact-date route registrations verified: "+historicalCandidates.length+". Callsign ignored.";
     }
     state.candidates=[];state.selected=null;state.aircraftChange=null;state.turnaround=null;state.inboundAircraft=null;state.dayFinished=false;
     const coverage=observedResults.map((result,index)=>result.status==="fulfilled"?(result.value?.coverage?.missing||[]):[]).flat();
