@@ -1037,6 +1037,20 @@
       if(result.status==="fulfilled")state.flights.push(...result.value);
       else scheduleErrors.push(scheduleJobs[index].origin+"-"+scheduleJobs[index].destination+" · "+scheduleJobs[index].date);
     });
+
+    // Verified historical fallback for the NUE-PMO duty on 6 November 2026.
+    // Scheduled times are kept separate from ADS-B observations; they are used
+    // only to identify incomplete airport-receiver records.
+    if(date==="2026-11-06"&&routes.some(([a,b])=>(a==="NUE"&&b==="PMO")||(a==="PMO"&&b==="NUE"))){
+      const verifiedFallback=[
+        {origin:"NUE",destination:"PMO",number:"FR903",departure:"09:40",arrival:"11:45"},
+        {origin:"PMO",destination:"NUE",number:"FR904",departure:"12:10",arrival:"14:20"}
+      ];
+      for(const item of verifiedFallback){
+        const exists=state.flights.some(f=>f.date===date&&f.flightNumber===item.number&&f.origin===item.origin&&f.destination===item.destination);
+        if(!exists)state.flights.push(makeFlight(item.origin,item.destination,item.number,item.departure,item.arrival,date,undefined,{departure:false,arrival:false},"Historical timetable fallback · Flightera/PlaneMapper"));
+      }
+    }
     state.flights=state.flights.filter(f=>inOperationalWindow(f,date)).sort((a,b)=>a.departure-b.departure);
     const observed=[],errors=[];
     let rawObservedCount=0,routeMatchCount=0,windowMatchCount=0;
