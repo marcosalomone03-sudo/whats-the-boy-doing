@@ -758,7 +758,7 @@
   }
   function minuteWords(value) { return String(Math.max(0,Math.round(value))); }
   function flightPhase(ac,distanceToDestination,onGround) {
-    if(onGround)return {icon:"🔄",label:"TURNAROUND",className:"ground"};
+    if(onGround)return state.turnaround&&state.turnaround.registration===ac.r?{icon:"🔄",label:"TURNAROUND",className:"ground"}:{icon:"🛬",label:"LANDED",className:"ground"};
     const altitude=numeric(ac.alt_baro),verticalRate=numeric(ac.baro_rate);
     if(altitude!==null&&altitude<=10000&&verticalRate!==null&&verticalRate>250)return {icon:"🛫",label:"CLIMB",className:"air"};
     if(altitude!==null&&altitude<=12000&&((verticalRate!==null&&verticalRate< -250)||(Number.isFinite(distanceToDestination)&&distanceToDestination<=35)))return {icon:"🛬",label:"LANDING",className:"air"};
