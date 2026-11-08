@@ -233,8 +233,12 @@
     const ap=airport(which==="departure"?flight.origin:flight.destination);
     const eventTime=which==="departure"?flight.departure:flight.arrival;
     // Free FlyItalyADSB tier: max 10 km and 6 hours per request.
+    const now=new Date();
     const from=new Date(eventTime.getTime()-2*3600000);
-    const to=new Date(eventTime.getTime()+2*3600000);
+    // Overflights only describe observations already received. Never ask the API
+    // for a future window; skip sectors whose observation window has not begun.
+    if(from>now)return [];
+    const to=new Date(Math.min(eventTime.getTime()+2*3600000,now.getTime()));
     const qs=new URLSearchParams({lat:String(ap.lat),lon:String(ap.lon),dist:"10",from:from.toISOString(),to:to.toISOString()});
     const data=await get("/api/overflights?"+qs.toString());
     return overflightRows(data).map(row=>({...row,checkpoint:which,flight}));
@@ -577,7 +581,7 @@
           deltaText=delta===0?"ON TIME":Math.abs(delta)+" MIN "+(delta<0?"EARLY":"LATE");
         }
         const statusMap={"ON TIME":"ON TIME · NO ACTUAL TIME","STARTED":"STARTED · NO ACTUAL TIME","LANDED":"LANDED","ARRIVED":"LANDED","DEPARTED":"DEPARTED","CANCELLED":"CANCELLED","CANCELED":"CANCELLED","DIVERTED":"DIVERTED"};
-        const inferred=actual?(isArrival?"LANDED":"DEPARTED"):(statusMap[rawStatus]||rawStatus||"SCHEDULED · NO ACTUAL TIME");
+        const inferred=actual?(isArrival?"LANDED":"DEPARTED")+(isArrival&&deltaText?" · "+deltaText:""):(statusMap[rawStatus]||rawStatus||"SCHEDULED · NO ACTUAL TIME");
         const badgeClass=/cancel|divert|delay|late/i.test(inferred)?"ground":actual?"air":"none";
         const eventLabel=actual?(isArrival?"ACTUAL ARRIVAL":"ACTUAL DEPARTURE"):estimated?(isArrival?"EST. ARRIVAL":"EST. DEPARTURE"):"SCHEDULED";
         const registration=plain(f.boardRegistration),aircraftType=plain(f.boardAircraftType);
@@ -696,9 +700,14 @@
         const rank=(x)=>(x.aircraft.turnaroundEvidence?100000:0)+(x.aircraft.poolMatch?5000:0)+x.aircraft.score;
         if(!old||rank(item)>rank(old))unique.set(key,item);
       }
-      const final=[...unique.values()].sort((a,b)=>(b.aircraft.turnaroundEvidence?1:0)-(a.aircraft.turnaroundEvidence?1:0)||b.aircraft.score-a.aircraft.score).slice(0,6);
+      // Do not display speculative aircraft. A candidate must be a Ryanair Group
+      // registry match, currently on the ground at NUE, and the SAME HEX must
+      // have been observed at NUE on the preceding inbound arrival and this
+      // outbound departure window. Otherwise we deliberately show no aircraft.
+      const final=[...unique.values()].filter(item=>item.flight.origin==="NUE"&&item.aircraft.onGround&&item.aircraft.operatorMatch&&item.aircraft.turnaroundEvidence)
+        .sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,3);
       state.candidates=final;
-      renderCandidates(final,final.length?"Live ADS-B candidates: B738/B38M route matches. Registry-confirmed aircraft are distinguished from EI/9H/SP-prefix possibilities; neither proves assignment to this flight.":adsbErrors.length?"ADS-B service could not complete the search. See the error details above.":"No live B738/B38M aircraft matched the route and position checks. This does not prove that the flight is not airborne.");
+      renderCandidates(final,final.length?"Aircraft linked by matching the same transponder HEX on the inbound arrival and current outbound ground observation.":adsbErrors.length?"ADS-B service could not complete the search. No aircraft assignment is shown.":"No aircraft can currently be linked reliably to an inbound arrival and the next NUE departure. I am hiding speculative matches rather than showing unrelated traffic.");
       // Never silently restore a previously selected aircraft after a fresh search.
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
