@@ -983,21 +983,25 @@
       $("sectors").innerHTML='<div class="empty">No matching observed sectors were returned for this duty date. This does not prove the flights did not operate.</div>';
     }else{
       $("sectors").innerHTML=rows.map((item,index)=>{
-        const f=item.schedule, o=item.observed;
-        const fromTime=item.departure?fmt(item.departure,airport(item.origin).tz):"—";
-        const toTime=item.arrival?fmt(item.arrival,airport(item.destination).tz):"—";
-        const scheduledDep=f?fmt(f.departure,airport(item.origin).tz):"—";
-        const scheduledArr=f?fmt(f.arrival,airport(item.destination).tz):"—";
+        const f=item.schedule, o=item.observed||{};
+        const originAirport=airport(item.origin), destinationAirport=airport(item.destination);
+        const originTz=originAirport?.tz||"UTC", destinationTz=destinationAirport?.tz||"UTC";
+        const originTimeLabel=originAirport?"local":"UTC · airport timezone unavailable";
+        const destinationTimeLabel=destinationAirport?"local":"UTC · airport timezone unavailable";
+        const fromTime=item.departure?fmt(item.departure,originTz):"—";
+        const toTime=item.arrival?fmt(item.arrival,destinationTz):"—";
+        const scheduledDep=f?fmt(f.departure,originTz):"—";
+        const scheduledArr=f?fmt(f.arrival,destinationTz):"—";
         const delay=item.delayMinutes;
         const status=item.arrival?historicalSeenLabel(o.to?.seen):"ARRIVAL NOT OBSERVED";
         const reg=item.registration||"REGISTRATION UNAVAILABLE";
         const aircraft=item.type||"TYPE UNAVAILABLE";
         const operation=item.nextOperation?'<div class="historical-operation">NEXT OPERATION · '+esc(item.nextOperation)+(item.nextRegistration?" · "+esc(item.nextRegistration):"")+'</div>':"";
         return '<div class="candidate historical-sector"><div class="flighttop"><div><b>'+esc(item.flightNumber)+' · '+esc(item.origin)+' → '+esc(item.destination)+'</b><small>'+esc(item.callsign||"Callsign unavailable")+' · '+esc(reg)+' · '+esc(aircraft)+'</small></div><span class="status '+(item.arrival?"ground":"none")+'">'+esc(status)+'</span></div>'+
-          '<div class="stats"><div class="stat"><small>Observed departure · local</small><strong>'+esc(fromTime)+'</strong><small>'+esc(historicalSeenLabel(o.from?.seen))+'</small></div>'+
-          '<div class="stat"><small>Observed arrival · local</small><strong>'+esc(toTime)+'</strong><small>'+esc(historicalSeenLabel(o.to?.seen))+'</small></div>'+
-          '<div class="stat"><small>Scheduled departure · local</small><strong>'+esc(scheduledDep)+'</strong></div>'+
-          '<div class="stat"><small>Scheduled arrival · local</small><strong>'+esc(scheduledArr)+'</strong></div></div>'+
+          '<div class="stats"><div class="stat"><small>Observed departure · '+esc(originTimeLabel)+'</small><strong>'+esc(fromTime)+'</strong><small>'+esc(historicalSeenLabel(o.from?.seen))+'</small></div>'+
+          '<div class="stat"><small>Observed arrival · '+esc(destinationTimeLabel)+'</small><strong>'+esc(toTime)+'</strong><small>'+esc(historicalSeenLabel(o.to?.seen))+'</small></div>'+
+          '<div class="stat"><small>Scheduled departure · '+esc(originTimeLabel)+'</small><strong>'+esc(scheduledDep)+'</strong></div>'+
+          '<div class="stat"><small>Scheduled arrival · '+esc(destinationTimeLabel)+'</small><strong>'+esc(scheduledArr)+'</strong></div></div>'+
           '<div class="notice">'+esc(f?(Number.isFinite(delay)?"THE BOY IS "+historicalDelayText(delay):"ARRIVAL DELAY UNAVAILABLE · OBSERVED ARRIVAL OR SCHEDULE MISSING"):"PUNCTUALITY UNAVAILABLE · NO MATCHING SCHEDULE")+
           (item.arrival?" · Arrival event observed by ADS-B; this is not a guaranteed touchdown time.":" · The arrival airport event was not observed.")+
           (item.board?" · Registration corroborated by NUE airport board.":"")+'</div>'+operation+'</div>';
