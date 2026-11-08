@@ -296,7 +296,9 @@
     const boardRow=row||{flightNumber:flight.flightNumber,origin:flight.origin,destination:flight.destination,direction:flight.origin==="NUE"?"departure":"arrival",registration,status:flight.boardStatus||"Not reported",scheduledLocalTime:flight.boardScheduledTime||flight.departureLocal||"",statusTimeLocal:flight.boardActualTime||flight.boardEstimatedTime||""};
     if(!registration)return {flight,aircraft:{boardOnly:true,boardReason:row?"The airport board has not published an aircraft registration for this flight.":"No matching registration was available from the Nuremberg board.",boardRow,boardEvidence:null}};
     try {
-      const cacheKey=registration.toUpperCase().replace(/[^A-Z0-9]/g,"");\n      if(!registrationCache.has(cacheKey))registrationCache.set(cacheKey,get("/api/registration?reg="+encodeURIComponent(registration)));\n      const ac=await registrationCache.get(cacheKey);
+      const cacheKey=registration.toUpperCase().replace(/[^A-Z0-9]/g,"");
+      if(!registrationCache.has(cacheKey))registrationCache.set(cacheKey,get("/api/registration?reg="+encodeURIComponent(registration)));
+      const ac=await registrationCache.get(cacheKey);
       if(ac?.notSeen)return {flight,aircraft:{boardOnly:true,boardReason:"FlyItalyADSB is not currently receiving this registration. This alone does not establish whether the aircraft is parked, switched off or outside receiver coverage.",boardRow,boardEvidence,r:registration,t:row?.aircraftType||flight.boardAircraftType||null}};
       const returnedReg=String(ac?.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const requestedReg=registration.toUpperCase().replace(/[^A-Z0-9]/g,"");
@@ -726,7 +728,8 @@
         return;
       }
       $("connection").textContent="NUE board registrations found · querying FlyItalyADSB by registration…";
-      const registrationCache=new Map();\n      const results=await Promise.allSettled(searchFlights.map(f=>identifyFlightByRegistration(f,registrationCache)));
+      const registrationCache=new Map();
+      const results=await Promise.allSettled(searchFlights.map(f=>identifyFlightByRegistration(f,registrationCache)));
       const final=[];
       const lookupErrors=[];
       results.forEach((r,i)=>{
