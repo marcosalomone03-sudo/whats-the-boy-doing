@@ -1047,6 +1047,8 @@
     const observed=[],errors=[];
     let rawObservedCount=0,routeMatchCount=0,windowMatchCount=0;
     const routeSamples=[];
+    const trace={records:0,routePair:0,registration:0,window:0,missingRegistration:0,missingAnchor:0,outsideWindow:0,inferred:0};
+    const rawSamples=[];
     observedResults.forEach((result,index)=>{
       if(result.status!=="fulfilled"){errors.push(observedJobs[index].airport+" "+observedJobs[index].day+" "+observedJobs[index].type+" ("+(result.reason?.message||"request failed")+")");return;}
       const flights=Array.isArray(result.value?.flights)?result.value.flights:[];
@@ -1063,6 +1065,8 @@
     // require an airport-board registration (historical boards are often empty),
     // and do not count every unrelated NUE movement.
     for(const rawFlight of observed){
+      trace.records++;
+      if(rawSamples.length<5)rawSamples.push({from:rawFlight?.from,to:rawFlight?.to,r:rawFlight?.r,icao:rawFlight?.icao,first_seen:rawFlight?.first_seen,last_seen:rawFlight?.last_seen});
       let inferredThisRecordFromSchedule=false;
       let origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
       let from=rawFlight.from?{...rawFlight.from,iata:origin}:null;
@@ -1118,6 +1122,7 @@
           destination=inferred.destination;
           inferredFromScheduleCount++;
           inferredThisRecordFromSchedule=true;
+          trace.inferred++;
           from={...(from||{}),iata:origin,airport:from?.airport||"",time:from?.time??null};
           to={...(to||{}),iata:destination,airport:to?.airport||"",time:to?.time??null};
         }
@@ -1128,8 +1133,10 @@
       // This prevents the historical result from becoming a list of every
       // aircraft movement at NUE, while avoiding dependence on an empty board.
       if(!routeSet.has(origin+"-"+destination))continue;
+      trace.routePair++;
       const observedRegistration=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      if(!observedRegistration)continue;
+      if(!observedRegistration){trace.missingRegistration++;continue;}
+      trace.registration++;
       // If a missing endpoint was inferred from the schedule, require a real
       // registration match in the NUE board before accepting that inference.
       if(inferredThisRecordFromSchedule){
@@ -1160,7 +1167,9 @@
       const dep=flight.from?.time!==null&&flight.from?.time!==undefined?Number(flight.from.time)*1000:NaN;
       const arr=flight.to?.time!==null&&flight.to?.time!==undefined?Number(flight.to.time)*1000:NaN;
       const anchor=origin==="NUE"?(Number.isFinite(dep)?dep:arr):(Number.isFinite(arr)?arr:dep);
-      if(!Number.isFinite(anchor)||anchor<start||anchor>=end)continue;
+      if(!Number.isFinite(anchor)){trace.missingAnchor++;continue;}
+      if(anchor<start||anchor>=end){trace.outsideWindow++;continue;}
+      trace.window++;
       windowMatchCount++;
       const key=[flight.icao||"",origin,destination,Number.isFinite(dep)?dep:"",Number.isFinite(arr)?arr:""].join("|");
       unique.set(key,flight);
@@ -1208,7 +1217,9 @@
       errors.length?"Some observed-flight requests failed: "+errors.join(", "):"",
       scheduleErrors.length?"Some timetable requests were unavailable: "+scheduleErrors.join(", "):"",
       !boardResult?"The historical NUE airport board was unavailable; timetable matching may be incomplete.":"",
-      "FlyItalyADSB airports queried: "+observedAirports.join(", ")+". Airport API records: "+rawObservedCount+" · route matches: "+routeMatchCount+" · duty-window matches: "+windowMatchCount+".",
+      "FlyItalyADSB airports queried: "+observedAirports.join(", ")+". Airport API records: "+rawObservedCount+" · parsed records: "+trace.records+" · route-pair matches: "+trace.routePair+" · with registration: "+trace.registration+" · in duty window: "+trace.window+".",
+      "Drop trace: missing registration "+trace.missingRegistration+" · missing timestamp "+trace.missingAnchor+" · outside duty window "+trace.outsideWindow+" · inferred endpoints "+trace.inferred+".",
+      "Raw observed samples: "+JSON.stringify(rawSamples),
       "Historical matching diagnostics: "+scheduleRouteRows.length+" timetable sectors · "+(state.dailyBoard?.flights?.length||0)+" NUE board rows · "+inferredFromScheduleCount+" incomplete ADS-B routes inferred.",
       "NUE board entries: "+(state.dailyBoard?.flights||[]).map(row=>[row.flightNumber,row.origin+"-"+row.destination,row.registration||"REG N/A",row.scheduledTime||row.scheduledLocalTime||"TIME N/A"].join(" ")).join(" | "),
       "Schedule requests: "+(state.scheduleDiagnostics||[]).map(item=>[item.route,item.date,item.source||"source",item.count??item.flightCount??item.returned??"no count"].join(" ")).join(" | "),
