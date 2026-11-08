@@ -1009,6 +1009,15 @@
     $("lastUpdated").textContent="HISTORICAL · "+date;
     $("lastFlight").innerHTML='<div class="empty">Historical searches do not change the saved live aircraft match on this device.</div>';
   }
+  function historicalAirportIata(end) {
+    const iata=String(end?.iata||"").toUpperCase();
+    if(iata&&AIRPORTS[iata])return iata;
+    const code=String(end?.airport||"").toUpperCase();
+    if(code&&AIRPORTS[code])return code;
+    const icaoToIata={EDDN:"NUE",LICJ:"PMO",LHBP:"BUD",LEAL:"ALC",EGSS:"STN",EIDW:"DUB",LEPA:"PMI",ESGG:"GOT",ESSA:"ARN",LOWW:"VIE",LEBL:"BCN",LIRF:"FCO",LIMC:"MXP",LIME:"BGY",EGCC:"MAN",EGGW:"LTN",EGPH:"EDI",EBCI:"CRL",EPKK:"KRK",EPWR:"WRO",LIBD:"BRI",LICC:"CTA",LIRN:"NAP",LPPR:"OPO",LPPT:"LIS",LEMG:"AGP",LEZL:"SVQ",LEMD:"MAD",EDDB:"BER",EDDH:"HAM",EDDF:"FRA",EDDM:"MUC",LSZH:"ZRH",EKCH:"CPH",ENGM:"OSL",ENBR:"BGO",EFHK:"HEL",EPGD:"GDN",EPWA:"WAW",LKPR:"PRG",GCLP:"LPA",GCTS:"TFS",GMMX:"RAK"};
+    return icaoToIata[code]||iata||code;
+  }
+
   async function runHistoricalDuty(route,date,routes) {
     const nextDate=addCalendarDay(date);
     const scheduleJobs=routes.flatMap(([origin,destination])=>[date,nextDate].map(day=>({origin,destination,date:day})));
@@ -1026,22 +1035,32 @@
     });
     state.flights=state.flights.filter(f=>inOperationalWindow(f,date)).sort((a,b)=>a.departure-b.departure);
     const observed=[],errors=[];
+    let rawObservedCount=0,routeMatchCount=0,windowMatchCount=0;
+    const routeSamples=[];
     observedResults.forEach((result,index)=>{
       if(result.status!=="fulfilled"){errors.push(observedJobs[index].day+" "+observedJobs[index].type);return;}
       const flights=Array.isArray(result.value?.flights)?result.value.flights:[];
+      rawObservedCount+=flights.length;
       observed.push(...flights);
     });
     const start=dateAtAirport(date,"03:00",airport("NUE")).getTime();
     const end=dateAtAirport(nextDate,"03:00",airport("NUE")).getTime();
     const routeSet=new Set(routes.map(pair=>pair.join("-")));
     const unique=new Map();
-    for(const flight of observed){
-      const origin=String(flight?.from?.iata||"").toUpperCase(),destination=String(flight?.to?.iata||"").toUpperCase();
+    for(const rawFlight of observed){
+      const origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
+      if(routeSamples.length<5)routeSamples.push(origin+"-"+destination);
       if(!routeSet.has(origin+"-"+destination))continue;
+      routeMatchCount++;
+      const flight={...rawFlight,
+        from:rawFlight.from?{...rawFlight.from,iata:origin}:rawFlight.from,
+        to:rawFlight.to?{...rawFlight.to,iata:destination}:rawFlight.to
+      };
       const dep=flight.from?.time!==null&&flight.from?.time!==undefined?Number(flight.from.time)*1000:NaN;
       const arr=flight.to?.time!==null&&flight.to?.time!==undefined?Number(flight.to.time)*1000:NaN;
       const anchor=origin==="NUE"?(Number.isFinite(dep)?dep:arr):(Number.isFinite(arr)?arr:dep);
       if(!Number.isFinite(anchor)||anchor<start||anchor>=end)continue;
+      windowMatchCount++;
       const key=[flight.icao||"",origin,destination,Number.isFinite(dep)?dep:"",Number.isFinite(arr)?arr:""].join("|");
       unique.set(key,flight);
     }
@@ -1070,7 +1089,9 @@
       coverage.length?"Missing observed-data days: "+[...new Set(coverage)].join(", "):"",
       errors.length?"Some observed-flight requests failed: "+errors.join(", "):"",
       scheduleErrors.length?"Some timetable requests were unavailable: "+scheduleErrors.join(", "):"",
-      !boardResult?"The historical NUE airport board was unavailable; timetable matching may be incomplete.":""
+      !boardResult?"The historical NUE airport board was unavailable; timetable matching may be incomplete.":"",
+      "Airport API records: "+rawObservedCount+" · route matches: "+routeMatchCount+" · duty-window matches: "+windowMatchCount+".",
+      !windowMatchCount&&rawObservedCount?"Sample observed routes: "+[...new Set(routeSamples)].join(", "):""
     ].filter(Boolean).join(" ");
     renderHistoricalDuty(rows,date,coverageMessage);
   }
