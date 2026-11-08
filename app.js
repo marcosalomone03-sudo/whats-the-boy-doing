@@ -1064,9 +1064,6 @@
         eligibleRegistrations.add(String(row.registration).toUpperCase().replace(/[^A-Z0-9]/g,""));
       }
     }
-    for(const registration of historicalFallbackRegistrations.values()){
-      eligibleRegistrations.add(String(registration).toUpperCase().replace(/[^A-Z0-9]/g,""));
-    }
     for(const rawFlight of observed){
       let origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
       let from=rawFlight.from?{...rawFlight.from,iata:origin}:null;
@@ -1506,7 +1503,7 @@
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
     state.dayFinished=false;
     state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; state.turnaround=null; renderAircraftChange(); state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null; state.registrationHistory=[]; renderAircraftHistory();
-    $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
+    $("candidates").className="empty"; $("candidates").textContent="Reading all historical NUE arrivals and departures from ADS-B, then matching available airport-board data…";
     $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
     try {
       if(date!==today){await runHistoricalDuty(route,date,routes);return;}
