@@ -54,7 +54,7 @@
     RAK:{name:"Marrakech",tz:"Africa/Casablanca",lat:31.6069,lon:-8.0363}
   };
 
-  const state = { flights:[], candidates:[], selected:null, inboundAircraft:null, aircraftChange:null, turnaround:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null, registrationHistory:[] };
+  const state = { flights:[], candidates:[], selected:null, inboundAircraft:null, aircraftChange:null, turnaround:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null, registrationHistory:[], dayFinished:false };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
@@ -95,6 +95,18 @@
   }
   function storageGet() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { return null; } }
   function storageSet(value) { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(value)); } catch(e) { console.warn("Local storage unavailable",e); } }
+  function dayFinishKey(route,date) { return "wtbd-day-finished-v1:"+route+":"+date; }
+  function sectorIdentity(flight) { return [flight.flightNumber,flight.date,flight.origin,flight.destination].join("|"); }
+  function readDayFinished(route,date,lastSector) {
+    try {
+      const saved=JSON.parse(localStorage.getItem(dayFinishKey(route,date))||"null");
+      return !!(saved&&lastSector&&saved.lastSector===sectorIdentity(lastSector));
+    } catch { return false; }
+  }
+  function saveDayFinished(route,date,lastSector) {
+    try { localStorage.setItem(dayFinishKey(route,date),JSON.stringify({lastSector:sectorIdentity(lastSector),finishedAt:new Date().toISOString()})); }
+    catch(e) { console.warn("Unable to save end-of-day status",e); }
+  }
 
   function localParts(date,tz) {
     return Object.fromEntries(new Intl.DateTimeFormat("en-GB",{timeZone:tz,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(date).map(p=>[p.type,p.value]));
@@ -816,6 +828,7 @@
     $("sectors").innerHTML=(flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)} · ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small></div><div class="time"><small>${f.departureEstimated?"EST. ":""}DEP · ${esc(f.origin)}</small>${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>${f.arrivalEstimated?"EST. ":""}ARR · ${esc(f.destination)}</small>${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`)+(missingGoogleLinks.length?`<div class="notice">Google fallback searches (only routes without a scheduled result): ${missingGoogleLinks.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.route)} ↗</a>`).join(" · ")}</div>`:"");
     $("sectorCount").textContent=flights.length+" SECTORS";
     const next=state.aircraftChange?.nextFlight||state.turnaround?.nextFlight||flights.find(f=>f.departure>now);
+    if(state.dayFinished){$("nextFlight").innerHTML=`<div class="empty"><strong>YAY, THE DAY IS FINISHED · FEIERABEND 🍻</strong></div>`;$("current").innerHTML=`<div class="empty"><strong>YAY, THE DAY IS FINISHED · FEIERABEND 🍻</strong></div>`;renderAircraftChange();return;}
     const lastSector=flights[flights.length-1];
     const selectedIsLastSector=!!(state.selected&&lastSector&&state.selected.flight.flightNumber===lastSector.flightNumber&&state.selected.flight.date===lastSector.date&&state.selected.flight.origin===lastSector.origin&&state.selected.flight.destination===lastSector.destination);
     const lastSectorLanded=selectedIsLastSector&&!!landingEvidence(state.selected.flight,state.selected.aircraft);
@@ -1119,6 +1132,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
+    state.dayFinished=false;
     state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; state.turnaround=null; renderAircraftChange(); state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null; state.registrationHistory=[]; renderAircraftHistory();
     $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
     $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
@@ -1144,6 +1158,14 @@
         $("connection").textContent="Timetable loaded · live registration lookup is only available for today";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
         if(scheduleErrors.length)showError(scheduleErrors.join("\\n"));
+        return;
+      }
+      const lastScheduledSector=state.flights[state.flights.length-1]||null;
+      if(readDayFinished(route,date,lastScheduledSector)){
+        state.dayFinished=true; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; state.turnaround=null;
+        renderCandidates([],"YAY, THE DAY IS FINISHED · FEIERABEND 🍻");
+        $("connection").textContent="FEIERABEND"; $("lastUpdated").textContent="DAY FINISHED";
+        render();
         return;
       }
       const nowMs=Date.now();
@@ -1199,6 +1221,15 @@
       else if(boardCurrentCandidate)state.selected=boardCurrentCandidate;
       else state.selected=null;
       const operationalCurrent=automatic||landedCandidate||boardCurrentCandidate;
+      const completedLastSector=!!(lastScheduledSector&&landedCandidate&&sectorIdentity(landedCandidate.flight)===sectorIdentity(lastScheduledSector)&&(landingEvidence(landedCandidate.flight,landedCandidate.aircraft)||landedCandidate.aircraft?.observedLanding?.seen==="ground"));
+      if(completedLastSector){
+        saveDayFinished(route,date,lastScheduledSector);
+        state.dayFinished=true; state.selected=null; state.aircraftChange=null; state.turnaround=null; state.inboundAircraft=null;
+        renderCandidates([],"YAY, THE DAY IS FINISHED · FEIERABEND 🍻");
+        $("connection").textContent="FEIERABEND"; $("lastUpdated").textContent="DAY FINISHED";
+        render();
+        return;
+      }
       if(operationalCurrent)await findAircraftChange(operationalCurrent,registrationCache);
       if(!operationalCurrent)await findInboundAircraft(state.flights,registrationCache);
       const liveCount=final.filter(item=>!item.aircraft.boardOnly).length;
