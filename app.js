@@ -909,12 +909,7 @@
       :item.eta
       ?'<div class="stat"><small>Estimated landing</small><strong>'+esc(item.eta.minutes)+' min · '+esc(fmt(item.eta.eta,ap.tz))+'</strong></div>'
       :'<div class="stat"><small>Landing status</small><strong>Not confirmed</strong></div>';
-    const arrivalText=landing
-      ?"Aircraft landed at "+fmt(landing.actual,ap.tz)+" · "+punctualityText(landing.delayMinutes)+"."
-      :item.eta
-      ?"The aircraft is estimated to land in "+item.eta.minutes+" minutes."
-      :"The aircraft landing time is not yet available.";
-    return '<div class="notice inbound-heading">🔄 THE BOY IS DOING TURNAROUND</div><div class="notice">'+esc(arrivalText)+'</div><div class="stats">'+landingLine+'<div class="stat"><small>Estimated departure · timetable</small><strong>'+esc(fmt(item.nextFlight.departure,ap.tz))+'</strong></div><div class="stat"><small>Next sector</small><strong>'+esc(item.nextFlight.flightNumber)+' · '+esc(item.nextFlight.origin)+' → '+esc(item.nextFlight.destination)+'</strong></div></div><div class="notice">Same aircraft registration '+esc(item.registration)+' is assigned to the next sector. Estimated departure is the scheduled timetable departure, not a live take-off prediction.</div>';
+    return '<div class="turnaround-card"><div class="turnaround-header"><div class="turnaround-symbol">↻</div><div class="turnaround-heading"><strong>THE BOY IS DOING TURNAROUND</strong><small>'+esc(item.registration)+' is assigned to the next sector</small></div><span class="turnaround-badge">TURNAROUND</span></div><div class="stats">'+landingLine+'<div class="stat"><small>Estimated departure · timetable</small><strong>'+esc(fmt(item.nextFlight.departure,ap.tz))+'</strong></div><div class="stat"><small>Next sector</small><strong>'+esc(item.nextFlight.flightNumber)+' · '+esc(item.nextFlight.origin)+' → '+esc(item.nextFlight.destination)+'</strong></div></div><div class="turnaround-footnote">Departure time is the scheduled timetable time, not a live take-off prediction.</div></div>';
   }
   function render() {
     const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();
