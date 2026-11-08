@@ -1,4 +1,4 @@
-const CACHE_NAME = "wtbd-v17-shell";
+const CACHE_NAME = "wtbd-v18-shell";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -34,8 +34,8 @@ self.addEventListener("fetch", event => {
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== self.location.origin) return;
 
-  const isAppCode = /\/(?:app|config)\.js$/.test(url.pathname);
-  const isPage = request.mode === "navigate" || /\/(?:index\.html)?$/.test(url.pathname);
+  const isAppCode = /\\/(?:app|config)\\.js$/.test(url.pathname);
+  const isPage = request.mode === "navigate" || /\\/(?:index\\.html)?$/.test(url.pathname);
 
   if (isAppCode || isPage) {
     event.respondWith((async () => {
