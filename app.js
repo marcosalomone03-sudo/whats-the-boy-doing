@@ -403,7 +403,7 @@
     const inboundFlight=item.previousRow?'<div class="muted">Inbound sector: '+esc(item.previousRow.flightNumber||"Unknown flight")+' · '+esc(item.previousRow.origin||"?")+' → '+esc(item.destination)+'</div>':'';
     el.hidden=false;
     $("aircraftChangeContent").innerHTML=
-      '<div class="notice inbound-heading">THE BOY NEEDS TO DO AN AIRCRAFT CHANGE IN '+esc(ap?.name||item.destination).toUpperCase()+'</div>'+
+      '<div class="notice inbound-heading">THE BOY NEEDS TO DO AN AIRCRAFT CHANGE WITH THIS AIRCRAFT IN '+esc(ap?.name||item.destination).toUpperCase()+'</div>'+
       '<div class="flighttop"><div><div class="flightno">'+esc(ac.r||nextRegFallback(item))+'</div><div class="route">'+esc(item.nextFlight.flightNumber)+' · '+esc(item.nextFlight.origin)+' → '+esc(item.nextFlight.destination)+'</div><div class="muted">Aircraft assigned to the next sector</div>'+inboundFlight+'</div><span class="status '+(item.mode==="live"?"air":"none")+'">'+status+'</span></div>'+
       '<div class="stats"><div class="stat"><small>Registration</small><strong>'+esc(ac.r||nextRegFallback(item))+'</strong></div><div class="stat"><small>Aircraft type</small><strong>'+esc(ac.t||ac.boardRow?.aircraftType||"—")+'</strong></div>'+
       (item.mode==="live"?'<div class="stat"><small>Call sign · ADS-B</small><strong>'+esc((ac.flight||"").trim()||"Not broadcast")+'</strong></div><div class="stat"><small>Ground speed</small><strong>'+Math.round(numeric(ac.gs))+' kt</strong></div>':"")+
