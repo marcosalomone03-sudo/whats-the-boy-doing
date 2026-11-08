@@ -1022,11 +1022,15 @@
     const nextDate=addCalendarDay(date);
     const scheduleJobs=routes.flatMap(([origin,destination])=>[date,nextDate].map(day=>({origin,destination,date:day})));
     const airportDates=[date,nextDate];
-    const observedJobs=airportDates.flatMap(day=>["arrivals","departures"].map(type=>({day,type})));
+    // Query every airport in the requested duty routes, not NUE alone.
+    // The observed-flight API can have coverage at the destination even when
+    // the NUE receivers did not capture the same movement.
+    const observedAirports=[...new Set(routes.flatMap(pair=>pair))];
+    const observedJobs=airportDates.flatMap(day=>observedAirports.flatMap(airportCode=>["arrivals","departures"].map(type=>({day,type,airport:airportCode}))));
     const [scheduleResults,boardResult,observedResults]=await Promise.all([
       Promise.allSettled(scheduleJobs.map(job=>loadRoute(job.origin,job.destination,job.date))),
       loadDailyBoard(date).catch(error=>{console.warn("Historical NUE board unavailable",error);return null;}),
-      Promise.allSettled(observedJobs.map(job=>get("/api/observed?airport=NUE&type="+job.type+"&date="+encodeURIComponent(job.day))))
+      Promise.allSettled(observedJobs.map(job=>get("/api/observed?airport="+encodeURIComponent(job.airport)+"&type="+job.type+"&date="+encodeURIComponent(job.day))))
     ]);
     const scheduleErrors=[];
     scheduleResults.forEach((result,index)=>{
@@ -1038,7 +1042,7 @@
     let rawObservedCount=0,routeMatchCount=0,windowMatchCount=0;
     const routeSamples=[];
     observedResults.forEach((result,index)=>{
-      if(result.status!=="fulfilled"){errors.push(observedJobs[index].day+" "+observedJobs[index].type);return;}
+      if(result.status!=="fulfilled"){errors.push(observedJobs[index].airport+" "+observedJobs[index].day+" "+observedJobs[index].type+" ("+(result.reason?.message||"request failed")+")");return;}
       const flights=Array.isArray(result.value?.flights)?result.value.flights:[];
       rawObservedCount+=flights.length;
       observed.push(...flights);
@@ -1090,7 +1094,7 @@
       errors.length?"Some observed-flight requests failed: "+errors.join(", "):"",
       scheduleErrors.length?"Some timetable requests were unavailable: "+scheduleErrors.join(", "):"",
       !boardResult?"The historical NUE airport board was unavailable; timetable matching may be incomplete.":"",
-      "Airport API records: "+rawObservedCount+" · route matches: "+routeMatchCount+" · duty-window matches: "+windowMatchCount+".",
+      "FlyItalyADSB airports queried: "+observedAirports.join(", ")+". Airport API records: "+rawObservedCount+" · route matches: "+routeMatchCount+" · duty-window matches: "+windowMatchCount+".",
       !windowMatchCount&&rawObservedCount?"Sample observed routes: "+[...new Set(routeSamples)].join(", "):""
     ].filter(Boolean).join(" ");
     renderHistoricalDuty(rows,date,coverageMessage);
