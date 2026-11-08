@@ -106,7 +106,7 @@
   }
   function storageGet() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { return null; } }
   function storageSet(value) { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(value)); } catch(e) { console.warn("Local storage unavailable",e); } }
-  function dayFinishKey(route,date) { return "wtbd-day-finished-v1:"+route+":"+date; }
+  function dayFinishKey(route,date) { return "wtbd-day-finished-v2:"+route+":"+date; }
   function sectorIdentity(flight) { return [flight.flightNumber,flight.date,flight.origin,flight.destination].join("|"); }
   function readDayFinished(route,date,lastSector) {
     try {
