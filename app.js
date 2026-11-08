@@ -400,7 +400,6 @@
     }
     const boyEta=current.aircraft.boardOnly?null:liveEtaToAirport(current.aircraft,destination,false);
     const boyLanding=landingEvidence(current.flight,current.aircraft);
-    if(!boyEta&&!boyLanding)return null;
     const result=await identifyFlightByRegistration(next,registrationCache), ac=result.aircraft;
     const inboundEta=ac&&!ac.boardOnly?liveEtaToAirport(ac,destination,true):null;
     const previousRow=ac?.boardEvidence?.previousRow||null;
@@ -1170,10 +1169,13 @@
       }
       const landedCandidate=automatic?null:final.filter(item=>landingEvidence(item.flight,item.aircraft))
         .sort((a,b)=>Math.abs(Date.now()-landingEvidence(a.flight,a.aircraft).actual.getTime())-Math.abs(Date.now()-landingEvidence(b.flight,b.aircraft).actual.getTime()))[0]||historyLandedCandidate;
+      const boardCurrentCandidate=automatic||landedCandidate?null:final.filter(item=>item.flight.departure.getTime()<=Date.now()+20*60000&&item.flight.arrival.getTime()>=Date.now()-180*60000)
+        .sort((a,b)=>Math.abs(Date.now()-a.flight.arrival.getTime())-Math.abs(Date.now()-b.flight.arrival.getTime()))[0]||null;
       if(automatic)saveSelected(automatic.flight,automatic.aircraft);
       else if(landedCandidate)state.selected=landedCandidate;
+      else if(boardCurrentCandidate)state.selected=boardCurrentCandidate;
       else state.selected=null;
-      const operationalCurrent=automatic||landedCandidate;
+      const operationalCurrent=automatic||landedCandidate||boardCurrentCandidate;
       if(operationalCurrent)await findAircraftChange(operationalCurrent,registrationCache);
       if(!operationalCurrent)await findInboundAircraft(state.flights,registrationCache);
       const liveCount=final.filter(item=>!item.aircraft.boardOnly).length;
