@@ -1059,12 +1059,13 @@
     const unique=new Map();
     let inferredFromScheduleCount=0;
     const scheduleRouteRows=state.flights.filter(f=>routeSet.has(f.origin+"-"+f.destination));
-    // Historical route traffic is not proof that it belongs to the Boy.
-    // Only accept registrations corroborated by the NUE board or by a
-    // specifically verified historical timetable record.
+    // Historical NUE traffic is not automatically the Boy's duty.
+    // Build the eligible aircraft set from every registration published by
+    // the NUE board for this date, not only the user-entered destination.
+    // Then follow those aircraft through the observed-flight records.
     const eligibleRegistrations=new Set();
     for(const row of state.dailyBoard?.flights||[]){
-      if(routeSet.has(row.origin+"-"+row.destination)&&row.registration){
+      if((row.origin==="NUE"||row.destination==="NUE")&&row.registration){
         eligibleRegistrations.add(String(row.registration).toUpperCase().replace(/[^A-Z0-9]/g,""));
       }
     }
@@ -1137,7 +1138,9 @@
       if(origin!=="NUE"&&destination!=="NUE")continue;
       const observedRegistration=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       if(!observedRegistration)continue;
-      if(inferredThisRecordFromSchedule&&!eligibleRegistrations.has(observedRegistration))continue;
+      // A complete route still needs a same-day NUE board registration
+      // match; otherwise this is merely another aircraft using NUE.
+      if(!eligibleRegistrations.has(observedRegistration))continue;
       // When endpoints are incomplete and the route was inferred from a
       // scheduled sector, require an event close to that sector's actual
       // scheduled departure/arrival. A registration alone is not enough:
