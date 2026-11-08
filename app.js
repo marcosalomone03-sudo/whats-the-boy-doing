@@ -963,7 +963,7 @@
     }
     const nearest=routeFlights.map(f=>({flight:f,distance:Math.min(Number.isFinite(depMs)?Math.abs(f.departure.getTime()-depMs):Infinity,Number.isFinite(arrMs)?Math.abs(f.arrival.getTime()-arrMs):Infinity)}))
       .sort((a,b)=>a.distance-b.distance)[0];
-    return nearest&&nearest.distance<=4*3600000?{flight:nearest.flight,board:null}:null;
+    return nearest&&nearest.distance<=90*60000?{flight:nearest.flight,board:null}:null;
   }
   function renderHistoricalDuty(rows,date,coverageMessage="") {
     const complete=rows.filter(x=>x.arrival);
@@ -1041,14 +1041,16 @@
     // Verified historical fallback for the NUE-PMO duty on 6 November 2026.
     // Scheduled times are kept separate from ADS-B observations; they are used
     // only to identify incomplete airport-receiver records.
+    const historicalFallbackRegistrations=new Map();
     if(date==="2026-11-06"&&routes.some(([a,b])=>(a==="NUE"&&b==="PMO")||(a==="PMO"&&b==="NUE"))){
       const verifiedFallback=[
-        {origin:"NUE",destination:"PMO",number:"FR903",departure:"09:40",arrival:"11:45"},
-        {origin:"PMO",destination:"NUE",number:"FR904",departure:"12:10",arrival:"14:20"}
+        {origin:"NUE",destination:"PMO",number:"FR903",departure:"09:40",arrival:"11:45",registration:"EI-HMV"},
+        {origin:"PMO",destination:"NUE",number:"FR904",departure:"12:10",arrival:"14:20",registration:"EI-HMV"}
       ];
       for(const item of verifiedFallback){
         const exists=state.flights.some(f=>f.date===date&&f.flightNumber===item.number&&f.origin===item.origin&&f.destination===item.destination);
         if(!exists)state.flights.push(makeFlight(item.origin,item.destination,item.number,item.departure,item.arrival,date,undefined,{departure:false,arrival:false},"Historical timetable fallback · Flightera/PlaneMapper"));
+        historicalFallbackRegistrations.set(item.origin+"-"+item.destination,item.registration);
       }
     }
     state.flights=state.flights.filter(f=>inOperationalWindow(f,date)).sort((a,b)=>a.departure-b.departure);
@@ -1067,6 +1069,18 @@
     const unique=new Map();
     let inferredFromScheduleCount=0;
     const scheduleRouteRows=state.flights.filter(f=>routeSet.has(f.origin+"-"+f.destination));
+    // Historical route traffic is not proof that it belongs to the Boy.
+    // Only accept registrations corroborated by the NUE board or by a
+    // specifically verified historical timetable record.
+    const eligibleRegistrations=new Set();
+    for(const row of state.dailyBoard?.flights||[]){
+      if(routeSet.has(row.origin+"-"+row.destination)&&row.registration){
+        eligibleRegistrations.add(String(row.registration).toUpperCase().replace(/[^A-Z0-9]/g,""));
+      }
+    }
+    for(const registration of historicalFallbackRegistrations.values()){
+      eligibleRegistrations.add(String(registration).toUpperCase().replace(/[^A-Z0-9]/g,""));
+    }
     for(const rawFlight of observed){
       let origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
       let from=rawFlight.from?{...rawFlight.from,iata:origin}:null;
@@ -1128,6 +1142,8 @@
 
       if(routeSamples.length<5)routeSamples.push(origin+"-"+destination);
       if(!routeSet.has(origin+"-"+destination))continue;
+      const observedRegistration=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      if(!observedRegistration||!eligibleRegistrations.has(observedRegistration))continue;
       routeMatchCount++;
       const flight={...rawFlight,from,to};
       const dep=flight.from?.time!==null&&flight.from?.time!==undefined?Number(flight.from.time)*1000:NaN;
