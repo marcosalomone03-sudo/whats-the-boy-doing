@@ -137,11 +137,13 @@ async function nurembergDailyBoard(date){
    const aircraft=row?.aircraft||f?.aircraft||{};
    const scheduled=row?.scheduledTime||f?.scheduledTime||"";
    const eventStatus=row?.status||f?.status||"";
+   const statusTime=eventStatus&&typeof eventStatus==="object"?(eventStatus.time||""):"";
    results.push({
     flightNumber,carrierCode:carrier,airlineName:String(f?.airline?.name||row?.airline?.name||""),
     direction:direction==="departures"?"departure":"arrival",origin:from,destination:to,date,
-    scheduledTime:scheduled,scheduledLocalTime:boardClock(scheduled),status:boardText(eventStatus),
-    statusTime:eventStatus?.time||"",registration:String(aircraft?.registration||""),
+    scheduledTime:scheduled,scheduledLocalTime:boardClock({scheduledTime:scheduled}),status:boardText(eventStatus),
+    statusTime,statusTimeLocal:statusTime?boardClock({time:statusTime}):"",
+    registration:String(aircraft?.registration||""),
     aircraftType:String(aircraft?.iata||aircraft?.icao||""),
     codeshares:[f?.airline2?.iata&&f?.number2?String(f.airline2.iata)+String(f.number2):"",f?.airline3?.iata&&f?.number3?String(f.airline3.iata)+String(f.number3):""].filter(Boolean),
     source:"Nuremberg Airport"
@@ -287,6 +289,17 @@ export default {
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
     const board=await nurembergDailyBoard(date);
     return cors(JSON.stringify(board),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
+   }
+   if(u.pathname==="/api/registration"){
+    if(!env.FLYITALYADSB_API_KEY)return cors(JSON.stringify({error:"FLYITALYADSB_API_KEY secret is not configured on this Worker."}),503,{"Content-Type":"application/json"});
+    const registration=(u.searchParams.get("reg")||"").toUpperCase().trim();
+    if(!/^[A-Z0-9][A-Z0-9 .-]{1,11}$/.test(registration))return cors(JSON.stringify({error:"Invalid aircraft registration"}),400,{"Content-Type":"application/json"});
+    const upstream=await fetch("https://api.flyitalyadsb.com/v2/reg/"+encodeURIComponent(registration),{
+     headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/16.0"}
+    });
+    const body=await upstream.text();
+    if(upstream.status===404)return cors(JSON.stringify({notSeen:true,registration,source:"FlyItalyADSB",detail:body}),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
+    return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"no-store","X-WTBD-ADS-B-Source":"FlyItalyADSB"});
    }
    if(u.pathname==="/api/board-diagnostics"){
     const date=u.searchParams.get("date")||new Date().toISOString().slice(0,10);
