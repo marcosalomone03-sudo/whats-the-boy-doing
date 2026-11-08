@@ -90,8 +90,9 @@ function normalizeBoardRows(payload,origin,destination,date,direction){
   const scheduledRaw=pick(flight,["scheduledTime","scheduledLocalTime","scheduledDateTime","scheduledDepartureTime","scheduledArrivalTime"])||pick(row,["scheduledTime","scheduledLocalTime","scheduledDateTime","scheduledDepartureTime","scheduledArrivalTime"])||pick(eventObject,["scheduledTime","scheduled","timeScheduled"])||boardTime;
   const statusRaw=pick(flight,["status","flightStatus","statusText","flightState","state","statusDescription"])||pick(row,["status","flightStatus","statusText","flightState","state","statusDescription"])||pick(eventObject,["status","statusText","state","description"]);
   const status=boardText(statusRaw);
-  const registration=boardText(pick(flight,["registration","aircraftRegistration","tailNumber"])||pick(row,["registration","aircraftRegistration","tailNumber"]));
-  const aircraftType=boardText(pick(flight,["aircraftType","aircraft","equipment","type"])||pick(row,["aircraftType","aircraft","equipment","type"]));
+  const aircraftObject=row?.aircraft||flight?.aircraft||{};
+  const registration=String(aircraftObject?.registration||flight?.registration||flight?.aircraftRegistration||row?.registration||row?.aircraftRegistration||"").trim();
+  const aircraftType=String(aircraftObject?.iata||aircraftObject?.icao||flight?.aircraftType||row?.aircraftType||"").trim();
   return {flightNumber:number,carrierCode:number.match(/^(FR|RK|RR|OE)/)[1],boardTime,boardType:direction==="departures"?"departure":"arrival",boardDate:date,
    boardScheduledTime:boardClock(scheduledRaw)||boardTime,boardActualTime:boardClock(actualRaw),boardEstimatedTime:boardClock(estimatedRaw),
    boardStatus:status,boardRegistration:registration,boardAircraftType:aircraftType,
@@ -111,6 +112,45 @@ async function nurembergFlights(origin,destination,date){
  const rows=boardRows(payload);
  const flights=normalizeBoardRows(payload,origin,destination,date,direction);
  return flights;
+}
+async function nurembergDailyBoard(date){
+ const base="https://airportnue-service.justrelate.io/production/api/flight-status/";
+ const headers={"Accept":"application/json, text/plain, */*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status","User-Agent":"Mozilla/5.0"};
+ const results=[];
+ for(const direction of ["departures","arrivals"]){
+  const url=base+direction+"?lang=en&flightNumber=&date="+dateCompact(date)+"&hourMin=&hourMax=";
+  const response=await fetch(url,{headers,cf:{cacheTtl:45,cacheEverything:true}});
+  if(!response.ok)throw new Error("Nuremberg "+direction+" board HTTP "+response.status);
+  const payload=await response.json(),rows=boardRows(payload);
+  for(const row of rows){
+   const f=row?.flight&&typeof row.flight==="object"?row.flight:row;
+   const carrier=String(f?.airline?.iata||row?.airline?.iata||"").toUpperCase();
+   if(!["FR","RK","RR","OE"].includes(carrier))continue;
+   const rawNumber=String(f?.number||f?.flightNumber||row?.flightNumber||row?.number||"").replace(/\\s/g,"").toUpperCase();
+   const flightNumber=/^(FR|RK|RR|OE)\\d{1,5}$/.test(rawNumber)?rawNumber:carrier+rawNumber;
+   if(!/^(FR|RK|RR|OE)\\d{1,5}$/.test(flightNumber))continue;
+   const localDate=boardDate(row);
+   if(localDate&&localDate!==dateCompact(date))continue;
+   const from=boardAirport(row,"from")||(direction==="departures"?"NUE":"");
+   const to=boardAirport(row,"to")||(direction==="arrivals"?"NUE":"");
+   if(!from||!to)continue;
+   const aircraft=row?.aircraft||f?.aircraft||{};
+   const scheduled=row?.scheduledTime||f?.scheduledTime||"";
+   const eventStatus=row?.status||f?.status||"";
+   results.push({
+    flightNumber,carrierCode:carrier,airlineName:String(f?.airline?.name||row?.airline?.name||""),
+    direction:direction==="departures"?"departure":"arrival",origin:from,destination:to,date,
+    scheduledTime:scheduled,scheduledLocalTime:boardClock(scheduled),status:boardText(eventStatus),
+    statusTime:eventStatus?.time||"",registration:String(aircraft?.registration||""),
+    aircraftType:String(aircraft?.iata||aircraft?.icao||""),
+    codeshares:[f?.airline2?.iata&&f?.number2?String(f.airline2.iata)+String(f.number2):"",f?.airline3?.iata&&f?.number3?String(f.airline3.iata)+String(f.number3):""].filter(Boolean),
+    source:"Nuremberg Airport"
+   });
+  }
+ }
+ const unique=[...new Map(results.map(x=>[x.direction+"|"+x.flightNumber+"|"+x.scheduledTime,x])).values()];
+ unique.sort((a,b)=>String(a.scheduledTime).localeCompare(String(b.scheduledTime)));
+ return {date,airport:"NUE",source:"Nuremberg Airport full daily board",carrierFilter:["FR","RK","RR","OE"],flightCount:unique.length,flights:unique,limitations:["Only Ryanair Group carrier codes FR/RK/RR/OE are included; codeshares are metadata, not operator proof.","The airport board's aircraft registration/type are scheduled-board metadata and may be changed operationally.","Aircraft swaps require independent aircraft/rotation evidence."]};
 }
 async function googleFlights(origin,destination,date){
  if(origin!=="NUE"&&destination!=="NUE")return [];
@@ -241,6 +281,12 @@ export default {
      }
     }
     return cors(JSON.stringify(pool||{airport:"NUE",date,aircraft:{},aircraftCount:0,limitations:["No pool stored for this date yet; initial collection may still be running or this is not the current UTC date."]}),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
+   }
+   if(u.pathname==="/api/daily-board"){
+    const date=u.searchParams.get("date")||new Date().toISOString().slice(0,10);
+    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
+    const board=await nurembergDailyBoard(date);
+    return cors(JSON.stringify(board),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
    }
    if(u.pathname==="/api/board-diagnostics"){
     const date=u.searchParams.get("date")||new Date().toISOString().slice(0,10);
