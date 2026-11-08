@@ -7,6 +7,7 @@
   const WORKER = String(cfg.WORKER_URL || cfg.workerUrl || "").replace(/\/+$/, "");
   const ROUTE_RE = /^[A-Z]{3}(?:-[A-Z]{3})?$/;
   const STORAGE_KEY = "wtbd-selected-v3";
+  const LAST_ROUTE_KEY = "wtbd-last-route-v1";
 
   let AIRPORTS = {
     NUE:{name:"Nuremberg",tz:"Europe/Berlin",lat:49.4987,lon:11.0780},
@@ -57,6 +58,7 @@
   const state = { flights:[], candidates:[], selected:null, inboundAircraft:null, aircraftChange:null, turnaround:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null, registrationHistory:[], dayFinished:false };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
+  try { const lastRoute=localStorage.getItem(LAST_ROUTE_KEY); if(lastRoute!==null) $("route").value=lastRoute; } catch(e) { console.warn("Unable to restore last route",e); }
 
   function airport(code) { return AIRPORTS[code] || null; }
   let airportCataloguePromise = null;
@@ -1125,6 +1127,7 @@
     if (!WORKER) { showError("Worker URL not configured. Check config.js."); return; }
     const route=$("route").value.trim().toUpperCase().replace(/\s+/g,"");
     const date=$("flightDate").value;
+    try { localStorage.setItem(LAST_ROUTE_KEY,route); } catch(e) { console.warn("Unable to save last route",e); }
     if (!ROUTE_RE.test(route)) { showError("Enter one airport code (BUD) or two (BUD-ALC)."); return; }
     if (!date) { showError("Choose a duty date."); return; }
     await loadAirportCatalogue();
@@ -1246,7 +1249,7 @@
     } finally { button.disabled=false; button.textContent="REFRESH DUTY & AIRCRAFT ↗"; }
   }
   $("track").addEventListener("click",run);
-  $("route").addEventListener("input",event=>{event.target.value=event.target.value.toUpperCase();});
+  $("route").addEventListener("input",event=>{event.target.value=event.target.value.toUpperCase(); try { localStorage.setItem(LAST_ROUTE_KEY,event.target.value); } catch(e) { console.warn("Unable to save last route",e); }});
   $("route").addEventListener("keydown",event=>{if(event.key==="Enter")run();});
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).catch(e=>console.warn("Service worker:",e));
   render();
