@@ -1236,7 +1236,7 @@
           if(!/^RYR/.test(callsign))continue;
           for(const aircraft of (Array.isArray(item.aircraft)?item.aircraft:[])){
             const registration=String(aircraft?.r||"").trim().toUpperCase();
-            if(!registration||!/[A-Z]/.test(registration)||!/[0-9]/.test(registration))continue;
+            if(!registration||!/[A-Z]/.test(registration)||!/[0-9]/.test(registration)||/^[0-9A-F]{6}$/.test(registration.replace(/[^A-Z0-9]/g,"")))continue;
             const key=registration.replace(/[^A-Z0-9]/g,"");
             if(!routeCalls.has(key))routeCalls.set(key,{registration,callsign,type:String(aircraft.t||""),origin:routes[index][0],destination:routes[index][1],flights:Number(item.flights)||0});
           }
