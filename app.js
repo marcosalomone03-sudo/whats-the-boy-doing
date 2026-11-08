@@ -1022,9 +1022,9 @@
     const nextDate=addCalendarDay(date);
     const scheduleJobs=routes.flatMap(([origin,destination])=>[date,nextDate].map(day=>({origin,destination,date:day})));
     const airportDates=[date,nextDate];
-    // Historical mode is an airport-wide NUE movement search, not a route-specific
-    // search. Query NUE arrivals and departures so every observed route is eligible.
-    const observedAirports=["NUE"];
+    // Always query all NUE movements; also query route endpoints because
+    // receiver coverage can be better at the destination airport.
+    const observedAirports=[...new Set(["NUE",...routes.flatMap(pair=>pair)])];
     const observedJobs=airportDates.flatMap(day=>observedAirports.flatMap(airportCode=>["arrivals","departures"].map(type=>({day,type,airport:airportCode}))));
     const [scheduleResults,boardResult,observedResults]=await Promise.all([
       Promise.allSettled(scheduleJobs.map(job=>loadRoute(job.origin,job.destination,job.date))),
@@ -1138,12 +1138,17 @@
       // scheduled sector, require an event close to that sector's actual
       // scheduled departure/arrival. A registration alone is not enough:
       // the same aircraft can operate several unrelated legs that day.
-      if(inferredFromScheduleCount>0&&(!from?.time&&!to?.time))continue;
+      if(inferredThisRecordFromSchedule&&(!from?.time&&!to?.time))continue;
       const observedEventTimes=[from?.time,to?.time].filter(value=>value!==null&&value!==undefined&&Number.isFinite(Number(value))).map(value=>Number(value)*1000);
       if(observedEventTimes.length){
         const relevantSchedules=scheduleRouteRows.filter(f=>f.origin===origin&&f.destination===destination);
-        const nearestScheduleDistance=Math.min(...relevantSchedules.flatMap(f=>observedEventTimes.map(ms=>Math.min(Math.abs(ms-f.departure.getTime()),Math.abs(ms-f.arrival.getTime())))));
-        if(!Number.isFinite(nearestScheduleDistance)||nearestScheduleDistance>90*60000)continue;
+        // Timetable proximity is an additional check only when a matching
+        // timetable sector exists. An empty airport board must not erase
+        // otherwise complete observed ADS-B routes.
+        if(relevantSchedules.length){
+          const nearestScheduleDistance=Math.min(...relevantSchedules.flatMap(f=>observedEventTimes.map(ms=>Math.min(Math.abs(ms-f.departure.getTime()),Math.abs(ms-f.arrival.getTime())))));
+          if(!Number.isFinite(nearestScheduleDistance)||nearestScheduleDistance>90*60000)continue;
+        }
       }
       routeMatchCount++;
       const flight={...rawFlight,from,to};
