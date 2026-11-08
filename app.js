@@ -853,6 +853,39 @@
     };
   }
 
+  function latestNueBoardFlight(board,registration) {
+    const key=String(registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    const nowMs=Date.now();
+    const rows=Array.isArray(board?.flights)?board.flights:[];
+    const matches=rows.filter(row=>{
+      const reg=String(row?.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      if(!key||reg!==key)return false;
+      if(!/^[A-Z]{3}$/.test(row.origin||"")||!/^[A-Z]{3}$/.test(row.destination||""))return false;
+      if(/cancel|divert/i.test(String(row.status||"")))return false;
+      const scheduled=Date.parse(row.scheduledTime||"");
+      const actual=Date.parse(row.statusTime||"");
+      const actualStatus=/departed|take.?off|airborne|landed|arrived/i.test(String(row.status||""));
+      const eventMs=actualStatus&&Number.isFinite(actual)?actual:scheduled;
+      return Number.isFinite(eventMs)&&eventMs<=nowMs+10*60000;
+    }).map(row=>{
+      const actual=Date.parse(row.statusTime||"");
+      const scheduled=Date.parse(row.scheduledTime||"");
+      const actualStatus=/departed|take.?off|airborne|landed|arrived/i.test(String(row.status||""));
+      const eventMs=actualStatus&&Number.isFinite(actual)?actual:scheduled;
+      return {
+        day:row.date||new Date(eventMs).toISOString().slice(0,10),
+        from:{iata:row.origin,time:eventMs/1000,seen:"board"},
+        to:{iata:row.destination,time:eventMs/1000,seen:"board"},
+        callsign:row.flightNumber||"",
+        status:row.status||"Scheduled",
+        board:true,
+        actual:actualStatus&&Number.isFinite(actual),
+        eventTime:eventMs/1000
+      };
+    }).sort((x,y)=>y.eventTime-x.eventTime);
+    return matches[0]||null;
+  }
+
   async function loadRegistrationHistories(items) {
     state.registrationHistory=[];
     const unique=new Map();
@@ -870,10 +903,15 @@
       if(result.status==="fulfilled")state.registrationHistory.push(result.value);
       else state.registrationHistory.push({key:targets[i][0],registration:targets[i][1],error:result.reason?.message||"History lookup failed"});
     }
-    const today=new Date().toISOString().slice(0,10);
+    const localNow=new Date();
+    const today=[localNow.getFullYear(),String(localNow.getMonth()+1).padStart(2,"0"),String(localNow.getDate()).padStart(2,"0")].join("-");
+    let board=null;
+    try{board=await get("/api/daily-board?date="+today);}catch(error){state.nueBoardError=error?.message||"Nuremberg board unavailable";}
     await Promise.all(state.registrationHistory.map(async item=>{
       const icao=String(item.data?.icao||"").toLowerCase();
-      if(item.error||! /^[0-9a-f]{6}$/.test(icao))return;
+      if(item.error)return;
+      item.latestBoard=latestNueBoardFlight(board,item.data?.r||item.registration);
+      if(!/^[0-9a-f]{6}$/.test(icao))return;
       try{
         const track=await get("/api/history?icao="+encodeURIComponent(icao)+"&date="+today);
         const latest=latestFlightFromTodayTrack(track);
@@ -897,22 +935,22 @@
         const duration=Number(f?.duration_min),arrival=Number(f?.to?.time||f?.last_seen);
         return /^[A-Z]{3}$/.test(from)&&/^[A-Z]{3}$/.test(to)&&from!==to&&Number.isFinite(duration)&&duration>=25&&duration<=600&&Number.isFinite(arrival);
       }).sort((a,b)=>Number(b.to?.time||b.last_seen)-Number(a.to?.time||a.last_seen));
-      const latest=item.latestToday||complete[0]||null;
+      const latest=[item.latestToday,item.latestBoard,complete[0]].filter(Boolean).sort((a,b)=>Number(b.eventTime||b.to?.time||b.last_seen||0)-Number(a.eventTime||a.to?.time||a.last_seen||0))[0]||null;
       const registration=data.r||item.registration;
       const coverage=data.coverage||{};
       const today=data.today||{};
       let latestHtml='<div class="empty">No complete flight is available in the returned history.</div>';
       if(latest){
         const from=latest.from.iata,to=latest.to.iata;
-        const seen=String(latest.to.seen||"unknown").toUpperCase();
+        const seen=latest.board?"NUE BOARD · "+String(latest.status||"SCHEDULED").toUpperCase()+(latest.actual?" · ACTUAL STATUS":" · SCHEDULED TIME"):String(latest.to.seen||"unknown").toUpperCase();
         const arrivalTime=Number(latest.to.time||latest.last_seen)*1000;
         const ageMs=Math.max(0,Date.now()-arrivalTime);
         const age=ageMs<3600000?Math.max(1,Math.round(ageMs/60000))+" min ago":ageMs<86400000?Math.round(ageMs/3600000)+" h ago":Math.floor(ageMs/86400000)+" days ago";
         const call=String(latest.callsign||"").trim();
-        latestHtml='<div class="history-flight latest-history-flight"><div><b>'+esc(from)+' → '+esc(to)+'</b><small>'+esc(latest.day||"Date unavailable")+(call?" · "+esc(call):"")+'</small><small>'+esc(historyAirportStamp(latest.from))+' → '+esc(historyAirportStamp(latest.to))+'</small><small>Arrival observation: '+esc(seen)+' · '+esc(age)+'</small>'+(latest.inferred?'<small>Route inferred from current-day ADS-B track and airport proximity; not an airline movement record.</small>':'')+'</div></div>';
+        latestHtml='<div class="history-flight latest-history-flight"><div><b>'+esc(from)+' → '+esc(to)+'</b><small>'+esc(latest.day||"Date unavailable")+(call?" · "+esc(call):"")+'</small><small>'+esc(historyAirportStamp(latest.from))+' → '+esc(historyAirportStamp(latest.to))+'</small><small>Arrival observation: '+esc(seen)+' · '+esc(age)+'</small>'+(latest.inferred?'<small>Route inferred from current-day ADS-B track and airport proximity; not an airline movement record.</small>':latest.board?'<small>Source: Nuremberg Airport daily board · '+(latest.actual?'actual event status':'scheduled board time')+'</small>':'')+'</div></div>';
       }
-      const note=latest?.inferred?"Today's route is inferred from the current-day ADS-B track and nearby airport observations; times are not guaranteed takeoff or touchdown timestamps.":"Historical ADS-B-derived observations, not an airline movement log; the archive is updated nightly and may not include today's movements.";
-      return '<div class="history-aircraft"><div class="flighttop"><div><div class="flightno">'+esc(registration)+'</div><div class="muted">ICAO HEX '+esc(data.icao||"—")+' · HISTORY '+esc(coverage.from||"—")+' to '+esc(coverage.to||"—")+'</div></div><span class="status none">'+(latest?.inferred?"TODAY · ADS-B TRACK":"LATEST ARCHIVE")+'</span></div>'+latestHtml+'<div class="notice">'+esc(note)+'</div></div>';
+      const note=latest?.board?"Nuremberg Airport daily board matched by aircraft registration. Actual event status is shown only when the board publishes it; otherwise the displayed time is scheduled.":latest?.inferred?"Today's route is inferred from the current-day ADS-B track and nearby airport observations; times are not guaranteed takeoff or touchdown timestamps.":"Historical ADS-B-derived observations, not an airline movement log; the archive is updated nightly and may not include today's movements.";
+      return '<div class="history-aircraft"><div class="flighttop"><div><div class="flightno">'+esc(registration)+'</div><div class="muted">ICAO HEX '+esc(data.icao||"—")+' · HISTORY '+esc(coverage.from||"—")+' to '+esc(coverage.to||"—")+'</div></div><span class="status none">'+(latest?.board?"TODAY · NUE BOARD":latest?.inferred?"TODAY · ADS-B TRACK":"LATEST ARCHIVE")+'</span></div>'+latestHtml+'<div class="notice">'+esc(note)+'</div></div>';
     }).join("");
   }
 
