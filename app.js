@@ -580,7 +580,7 @@
           if(delta>720)delta-=1440;if(delta< -720)delta+=1440;
           deltaText=delta===0?"ON TIME":Math.abs(delta)+" MIN "+(delta<0?"EARLY":"LATE");
         }
-        const statusMap={"ON TIME":"ON TIME · NO ACTUAL TIME","STARTED":"STARTED · NO ACTUAL TIME","LANDED":"LANDED","ARRIVED":"LANDED","DEPARTED":"DEPARTED","CANCELLED":"CANCELLED","CANCELED":"CANCELLED","DIVERTED":"DIVERTED"};
+        const statusMap={"ON TIME":"ON TIME · NO ACTUAL TIME","STARTED":"STARTED · NO ACTUAL TIME","LANDED":"LANDED","ARRIVED":"LANDED","DEPARTED":"DEPARTED","ROLLING":"TAXIING","CANCELLED":"CANCELLED","CANCELED":"CANCELLED","DIVERTED":"DIVERTED"};
         const inferred=actual?(isArrival?"LANDED":"DEPARTED")+(isArrival&&deltaText?" · "+deltaText:""):(statusMap[rawStatus]||rawStatus||"SCHEDULED · NO ACTUAL TIME");
         const badgeClass=/cancel|divert|delay|late/i.test(inferred)?"ground":actual?"air":"none";
         const eventLabel=actual?(isArrival?"ACTUAL ARRIVAL":"ACTUAL DEPARTURE"):estimated?(isArrival?"EST. ARRIVAL":"EST. DEPARTURE"):"SCHEDULED";
@@ -707,6 +707,11 @@
       const final=[...unique.values()].filter(item=>item.flight.origin==="NUE"&&item.aircraft.onGround&&item.aircraft.operatorMatch&&item.aircraft.turnaroundEvidence)
         .sort((a,b)=>b.aircraft.score-a.aircraft.score).slice(0,3);
       state.candidates=final;
+      // If the same registered aircraft is linked across the inbound and outbound
+      // legs and ADS-B shows it moving on the ground, select it automatically.
+      const taxiingMatch=final.find(item=>numeric(item.aircraft.gs)!==null&&numeric(item.aircraft.gs)>=5);
+      if(taxiingMatch) saveSelected(taxiingMatch.flight,taxiingMatch.aircraft);
+      else state.selected=null;
       renderCandidates(final,final.length?"Aircraft linked by matching the same transponder HEX on the inbound arrival and current outbound ground observation.":adsbErrors.length?"ADS-B service could not complete the search. No aircraft assignment is shown.":"No aircraft can currently be linked reliably to an inbound arrival and the next NUE departure. I am hiding speculative matches rather than showing unrelated traffic.");
       // Never silently restore a previously selected aircraft after a fresh search.
       render();
