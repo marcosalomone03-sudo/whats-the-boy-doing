@@ -242,6 +242,27 @@ export default {
     }
     return cors(JSON.stringify(pool||{airport:"NUE",date,aircraft:{},aircraftCount:0,limitations:["No pool stored for this date yet; initial collection may still be running or this is not the current UTC date."]}),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
    }
+   if(u.pathname==="/api/board-diagnostics"){
+    const date=u.searchParams.get("date")||new Date().toISOString().slice(0,10);
+    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid date"}),400,{"Content-Type":"application/json"});
+    const directions=["departures","arrivals"];
+    const variants=[{name:"omitted",suffix:""},{name:"NUE",suffix:"&airportIata=NUE"},{name:"empty",suffix:"&airportIata="}];
+    const headers={"Accept":"application/json, text/plain, */*","Origin":"https://www.airport-nuernberg.de","Referer":"https://www.airport-nuernberg.de/en/flight-status","User-Agent":"Mozilla/5.0"};
+    const results=[];
+    for(const direction of directions){
+     for(const variant of variants){
+      const url="https://airportnue-service.justrelate.io/production/api/flight-status/"+direction+"?lang=en"+variant.suffix+"&flightNumber=&date="+dateCompact(date)+"&hourMin=&hourMax=";
+      try{
+       const response=await fetch(url,{headers,cf:{cacheTtl:30,cacheEverything:true}});
+       const body=await response.text();let payload=null;
+       try{payload=JSON.parse(body);}catch{}
+       const rows=payload?boardRows(payload):[];
+       results.push({direction,variant:variant.name,httpStatus:response.status,contentType:response.headers.get("Content-Type")||"",payloadType:Array.isArray(payload)?"array":typeof payload,topLevelKeys:payload&&typeof payload==="object"&&!Array.isArray(payload)?Object.keys(payload).slice(0,25):[],rowCount:rows.length,firstRowKeys:rows[0]&&typeof rows[0]==="object"?Object.keys(rows[0]).slice(0,35):[],samples:rows.slice(0,5).map(row=>({flightNumber:row?.flight?.number||row?.flightNumber||row?.number||"",from:boardAirport(row,"from"),to:boardAirport(row,"to"),date:boardDate(row)})),bodyPreview:rows.length?undefined:body.slice(0,240)});
+      }catch(error){results.push({direction,variant:variant.name,error:String(error?.message||error)});}
+     }
+    }
+    return cors(JSON.stringify({date,source:"Nuremberg Airport flight-status API",results}),200,{"Content-Type":"application/json","Cache-Control":"no-store"});
+   }
    if(u.pathname==="/api/schedule"){
     const origin=(u.searchParams.get("origin")||"").toUpperCase(),destination=(u.searchParams.get("destination")||"").toUpperCase(),date=u.searchParams.get("date")||"";
     if(!/^[A-Z]{3}$/.test(origin)||!/^[A-Z]{3}$/.test(destination)||!(origin==="NUE"||destination==="NUE")||!/^\d{4}-\d{2}-\d{2}$/.test(date))return cors(JSON.stringify({error:"Invalid schedule parameters; every tracked route must touch NUE and include a date."}),400,{"Content-Type":"application/json"});
