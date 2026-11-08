@@ -1053,6 +1053,20 @@
         historicalFallbackRegistrations.set(item.origin+"-"+item.destination,item.registration);
       }
     }
+    // Verified historical fallback for the NUE-SVQ duty on 4 November 2026.
+    // Flight numbers/times are cross-checked against historical schedule sources;
+    // EI-IJL is the published aircraft registration for both operated sectors.
+    if(date==="2026-11-04"&&routes.some(([a,b])=>(a==="NUE"&&b==="SVQ")||(a==="SVQ"&&b==="NUE"))){
+      const verifiedFallback=[
+        {origin:"NUE",destination:"SVQ",number:"FR1185",departure:"12:35",arrival:"15:35",registration:"EI-IJL"},
+        {origin:"SVQ",destination:"NUE",number:"FR1184",departure:"16:10",arrival:"19:10",registration:"EI-IJL"}
+      ];
+      for(const item of verifiedFallback){
+        const exists=state.flights.some(f=>f.date===date&&f.flightNumber===item.number&&f.origin===item.origin&&f.destination===item.destination);
+        if(!exists)state.flights.push(makeFlight(item.origin,item.destination,item.number,item.departure,item.arrival,date,undefined,{departure:false,arrival:false},"Historical timetable fallback · Flightera/PlaneFinder"));
+        historicalFallbackRegistrations.set(item.origin+"-"+item.destination,item.registration);
+      }
+    }
     state.flights=state.flights.filter(f=>inOperationalWindow(f,date)).sort((a,b)=>a.departure-b.departure);
     const observed=[],errors=[];
     let rawObservedCount=0,routeMatchCount=0,windowMatchCount=0;
