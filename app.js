@@ -404,11 +404,19 @@
     const inboundEta=ac&&!ac.boardOnly?liveEtaToAirport(ac,destination,true):null;
     const previousRow=ac?.boardEvidence?.previousRow||null;
     let inboundLanding=landingEvidenceFromRow(previousRow,destination);
-    const inboundHistory=!inboundLanding&&!inboundEta?await observedArrivalForRegistration(nextReg,destination,current.flight.arrival,registrationCache):null;
+    const historyItem=state.registrationHistory.find(item=>{
+      const key=String(item.data?.r||item.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      return key===nextReg;
+    });
+    const dspGround=historyItem?.latestTodayLanding?.airport===destination?historyItem.latestTodayLanding:null;
+    const dspEstimate=historyItem?.latestTodayEstimatedLanding?.airport===destination?historyItem.latestTodayEstimatedLanding:null;
+    const inboundHistory=!inboundLanding&&!dspGround&&!dspEstimate&&!inboundEta?await observedArrivalForRegistration(nextReg,destination,current.flight.arrival,registrationCache):null;
+    const dspGroundEvidence=dspGround?{actual:new Date(Number(dspGround.time)*1000),scheduled:next.arrival,delayMinutes:null,status:"ADS-B ground observation",source:"FlyItalyADSB daily trace"}:null;
+    const dspEstimateEvidence=dspEstimate&&Number.isFinite(Number(dspEstimate.time))?{actual:new Date(Number(dspEstimate.time)*1000),observed:new Date(Number(dspEstimate.observedTime)*1000),source:"FlyItalyADSB DSP descent estimate"}:null;
     const boyTime=boyLanding?.actual||boyEta?.eta||null;
-    const inboundTime=inboundLanding?.actual||(inboundHistory?.seen==="ground"?inboundHistory.actual:null)||inboundEta?.eta||null;
+    const inboundTime=inboundLanding?.actual||dspGroundEvidence?.actual||(inboundHistory?.seen==="ground"?inboundHistory.actual:null)||dspEstimateEvidence?.actual||inboundEta?.eta||null;
     const difference=boyTime&&inboundTime?Math.round((inboundTime-boyTime)/60000):null;
-    state.aircraftChange={destination,nextFlight:next,aircraft:ac||{boardOnly:true,r:nextReg},inboundEta,boyEta,boyLanding,inboundLanding,inboundHistory,previousRow,difference,mode:inboundLanding?"board-landed":inboundHistory?"history-landed":inboundEta?"live":"assigned-only"};
+    state.aircraftChange={destination,nextFlight:next,aircraft:ac||{boardOnly:true,r:nextReg},inboundEta,boyEta,boyLanding,inboundLanding,dspGroundEvidence,dspEstimateEvidence,inboundHistory,previousRow,difference,mode:inboundLanding?"board-landed":dspGroundEvidence?"adsb-ground":inboundHistory?"history-landed":dspEstimateEvidence?"estimated-landed":inboundEta?"live":"assigned-only"};
     return state.aircraftChange;
   }
   function renderAircraftChange() {
@@ -417,9 +425,12 @@
     if(!el)return;
     if(!item){el.hidden=true;return;}
     const ap=airport(item.destination), ac=item.aircraft;
-    const inboundLanding=item.inboundLanding||(item.inboundHistory?.seen==="ground"?item.inboundHistory:null);
+    const inboundLanding=item.inboundLanding||item.dspGroundEvidence||(item.inboundHistory?.seen==="ground"?item.inboundHistory:null);
+    const inboundEstimate=item.dspEstimateEvidence;
     const inboundText=inboundLanding
       ?"The replacement aircraft landed "+minutesAgoText(inboundLanding.actual)+"."
+      :inboundEstimate
+      ?"DSP estimates that the replacement aircraft landed "+minutesAgoText(inboundEstimate.actual)+" (around "+fmt(inboundEstimate.actual,ap.tz)+" local)."
       :item.inboundEta
       ?"The replacement aircraft is landing in about "+item.inboundEta.minutes+" minutes."
       :item.inboundHistory
@@ -430,7 +441,7 @@
       :item.boyEta
       ?"THE BOY IS LANDING IN ABOUT "+item.boyEta.minutes+" MINUTES"
       :"The boy's landing at "+item.destination+" is not yet confirmed.";
-    const status=item.mode==="live"?"LIVE ADS-B":inboundLanding?"LANDED":item.inboundHistory?"NEAR AIRPORT · NOT CONFIRMED":"ASSIGNED · NO LIVE ADS-B";
+    const status=item.mode==="live"?"LIVE ADS-B":inboundLanding?"LANDED":inboundEstimate?"ESTIMATED LANDING · DSP":item.inboundHistory?"NEAR AIRPORT · NOT CONFIRMED":"ASSIGNED · NO LIVE ADS-B";
     const inboundFlight=item.previousRow?'<div class="muted">Inbound sector: '+esc(item.previousRow.flightNumber||"Unknown flight")+' · '+esc(item.previousRow.origin||"?")+' → '+esc(item.destination)+'</div>':"";
     el.hidden=false;
     $("aircraftChangeContent").innerHTML=
@@ -438,7 +449,8 @@
       '<div class="flighttop"><div><div class="flightno">'+esc(ac.r||nextRegFallback(item))+'</div><div class="route">'+esc(item.nextFlight.flightNumber)+' · '+esc(item.nextFlight.origin)+' → '+esc(item.nextFlight.destination)+'</div><div class="muted">Replacement aircraft assigned to the next sector</div>'+inboundFlight+'</div><span class="status '+(item.mode==="live"?"air":inboundLanding?"ground":"none")+'">'+status+'</span></div>'+
       '<div class="stats"><div class="stat"><small>Replacement aircraft</small><strong>'+esc(ac.r||nextRegFallback(item))+'</strong></div><div class="stat"><small>Aircraft type</small><strong>'+esc(ac.t||ac.boardRow?.aircraftType||"—")+'</strong></div>'+
       (item.mode==="live"?'<div class="stat"><small>Live ground speed</small><strong>'+Math.round(numeric(ac.gs))+' kt</strong></div>':"")+
-      (inboundLanding?'<div class="stat"><small>Replacement landed · local</small><strong>'+esc(fmt(inboundLanding.actual,ap.tz))+'</strong></div><div class="stat"><small>Replacement landed</small><strong>'+esc(minutesAgoText(inboundLanding.actual))+'</strong></div>':item.inboundEta?'<div class="stat"><small>Estimated landing</small><strong>'+esc(item.inboundEta.minutes)+' min · '+esc(fmt(item.inboundEta.eta,ap.tz))+'</strong></div>':"")+
+      (inboundLanding?'<div class="stat"><small>Replacement landed · local</small><strong>'+esc(fmt(inboundLanding.actual,ap.tz))+'</strong></div><div class="stat"><small>Replacement landed</small><strong>'+esc(minutesAgoText(inboundLanding.actual))+'</strong></div>':inboundEstimate?'<div class="stat"><small>DSP estimated landing · local</small><strong>~'+esc(fmt(inboundEstimate.actual,ap.tz))+'</strong></div><div class="stat"><small>DSP estimate age</small><strong>'+esc(minutesAgoText(inboundEstimate.actual))+'</strong></div>':item.inboundEta?'<div class="stat"><small>Estimated landing</small><strong>'+esc(item.inboundEta.minutes)+' min · '+esc(fmt(item.inboundEta.eta,ap.tz))+'</strong></div>':"")+
+      '<div class="stat"><small>Estimated departure · timetable</small><strong>'+esc(fmt(item.nextFlight.departure,airport(item.nextFlight.origin).tz))+'</strong></div>'+
       (item.boyLanding?'<div class="stat"><small>Boy landed · local</small><strong>'+esc(fmt(item.boyLanding.actual,ap.tz))+'</strong></div><div class="stat"><small>Boy punctuality</small><strong>'+esc(punctualityText(item.boyLanding.delayMinutes))+'</strong></div>':item.boyEta?'<div class="stat"><small>Boy estimated landing</small><strong>'+esc(item.boyEta.minutes)+' min</strong></div>':"")+
       '</div><div class="notice">'+esc(inboundText)+' '+esc(boyText)+' The next-sector registration comes from the Nuremberg Airport board and is not airline-confirmed. ADS-B landing estimates are not confirmed touchdown times.</div>';
   }
@@ -795,7 +807,7 @@
     const missingGoogleLinks=state.googleLinks.filter(x=>!flights.some(f=>x.route===f.origin+"-"+f.destination));
     $("sectors").innerHTML=(flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)} · ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small></div><div class="time"><small>${f.departureEstimated?"EST. ":""}DEP · ${esc(f.origin)}</small>${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>${f.arrivalEstimated?"EST. ":""}ARR · ${esc(f.destination)}</small>${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`)+(missingGoogleLinks.length?`<div class="notice">Google fallback searches (only routes without a scheduled result): ${missingGoogleLinks.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.route)} ↗</a>`).join(" · ")}</div>`:"");
     $("sectorCount").textContent=flights.length+" SECTORS";
-    const next=flights.find(f=>f.departure>now);
+    const next=state.aircraftChange?.nextFlight||state.turnaround?.nextFlight||flights.find(f=>f.departure>now);
     $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
     $("current").innerHTML=state.selected?(state.selected.aircraft?.boardOnly||landingEvidence(state.selected.flight,state.selected.aircraft)?renderBoardLanding(state.selected.flight,state.selected.aircraft):renderAircraft(state.selected.flight,state.selected.aircraft))+(state.turnaround?renderTurnaround(state.selected.flight,state.turnaround):""):`<div class="empty">No live aircraft selected. The results below distinguish live ADS-B positions from airport-board-only operational status.</div>`;
     renderAircraftChange();
