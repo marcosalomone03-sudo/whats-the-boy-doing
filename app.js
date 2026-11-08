@@ -1072,10 +1072,11 @@
       let from=rawFlight.from?{...rawFlight.from,iata:origin}:null;
       let to=rawFlight.to?{...rawFlight.to,iata:destination}:null;
 
-      // NUE airport observations often contain only the endpoint seen by the
-      // receiver. Recover the other airport from the historical NUE board,
-      // matching registration and the observed NUE timestamp.
-      if(!routeSet.has(origin+"-"+destination)){
+      // Complete observed routes involving NUE are accepted regardless of
+      // the destination entered in the search field. Use the board/timetable
+      // only to recover a genuinely missing endpoint.
+      const hasCompleteNueRoute=!!origin&&!!destination&&origin!==destination&&(origin==="NUE"||destination==="NUE");
+      if(!origin||!destination){
         const reg=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
         const eventTimes=[from?.time,to?.time,rawFlight.first_seen,rawFlight.last_seen]
           .map(value=>Number(value)*1000).filter(Number.isFinite);
@@ -1129,10 +1130,10 @@
       }
 
       if(routeSamples.length<5)routeSamples.push(origin+"-"+destination);
-      // Only count sectors on the route(s) explicitly entered by the user.
-      // This prevents the historical result from becoming a list of every
-      // aircraft movement at NUE, while avoiding dependence on an empty board.
-      if(!routeSet.has(origin+"-"+destination))continue;
+      // Historical duty mode covers every complete observed arrival/departure
+      // at NUE, not just the destination used to open the search.
+      // Reject same-airport movements, incomplete routes and unrelated legs.
+      if(!origin||!destination||origin===destination||(origin!=="NUE"&&destination!=="NUE"))continue;
       trace.routePair++;
       const observedRegistration=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       if(!observedRegistration){trace.missingRegistration++;continue;}
