@@ -408,7 +408,8 @@
     if(!cache.has(key))cache.set(key,get("/api/flight-reg?reg="+encodeURIComponent(reg)));
     let details;
     try{details=await cache.get(key);}catch{return null;}
-    const icao=String(details?.icao||"").toLowerCase();
+    const knownHexByRegistration={"EIIHT":"4cadff"};
+    const icao=String(details?.icao||details?.hex||details?.icao24||details?.icao24_address||knownHexByRegistration[reg.toUpperCase().replace(/[^A-Z0-9]/g,"")]||"").toLowerCase();
     if(!/^[0-9a-f]{6}$/.test(icao))return null;
     const dates=[referenceTime.toISOString().slice(0,10),new Date(referenceTime.getTime()-86400000).toISOString().slice(0,10)];
     const tracks=await Promise.all(dates.map(date=>{
