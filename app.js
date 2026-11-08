@@ -563,14 +563,7 @@
     storageSet(saved);
     state.selected={flight,aircraft};
   }
-  function minuteWords(value) {
-    const n=Math.max(0,Math.round(value));
-    const ones=["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"];
-    const tens=["","","twenty","thirty","forty","fifty","sixty"];
-    if(n<20)return ones[n];
-    if(n<60)return tens[Math.floor(n/10)]+(n%10?"-"+ones[n%10]:"");
-    return String(n);
-  }
+  function minuteWords(value) { return String(Math.max(0,Math.round(value))); }
   function renderAircraft(flight,ac) {
     const onGround=ac.alt_baro==="ground";
     const altitude=numeric(ac.alt_baro), speed=numeric(ac.gs), lat=numeric(ac.lat), lon=numeric(ac.lon);
@@ -593,15 +586,11 @@
     }
     return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><div class="status-stack"><span class="status ${statusClass}">${status}</span>${punctualityLabel?`<span class="status ${punctualityClass}">${esc(punctualityLabel)}</span>`:""}</div></div><div class="notice">${ac.boardEvidence?"DAILY BOARD REGISTRATION MATCH — "+esc(ac.boardEvidence.registration)+". ":""}Live ADS-B reports the aircraft ${onGround?(taxiing?"on the surface and moving at "+Math.round(speed||0)+" kt":"on the surface"):"airborne"}. Registration and HEX are read from the transponder feed. The airport board assignment is not airline-confirmed.</div>
       <div class="stats">
-        <div class="stat"><small>ADS-B callsign · unverified</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
-        <div class="stat"><small>ICAO HEX</small><strong>${esc(ac.hex)}</strong></div>
         <div class="stat"><small>Registration</small><strong>${esc(ac.r)}</strong></div>
         <div class="stat"><small>Aircraft type</small><strong>${esc(ac.t)}</strong></div>
         <div class="stat"><small>Ground speed</small><strong>${speed===null?"—":Math.round(speed)+" kt"}</strong></div>
         <div class="stat"><small>Altitude</small><strong>${onGround?"GROUND":altitude===null?"—":Math.round(altitude).toLocaleString()+" ft"}</strong></div>
         <div class="stat"><small>ESTIMATED ARRIVAL · LOCAL</small><strong>${esc(etaLabel)}</strong></div>
-        <div class="stat"><small>Latitude</small><strong>${lat===null?"—":lat.toFixed(4)}</strong></div>
-        <div class="stat"><small>Longitude</small><strong>${lon===null?"—":lon.toFixed(4)}</strong></div>
       </div><div class="notice">ETA is a simple live estimate from remaining great-circle distance and current ground speed; wind, routing and speed changes can alter it. ADS-B position age: ${Math.round(positionAge(ac))} seconds.</div>`;
   }
   function render() {
