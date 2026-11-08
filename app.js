@@ -1394,8 +1394,8 @@
         showError("NUE timetable diagnostic ("+(d.route||"route")+"): "+detail);
         return;
       }
-      const today=operationalDutyDate(new Date());
-      if(date!==today){
+      const operationalToday=operationalDutyDate(new Date());
+      if(date!==operationalToday){
         renderCandidates([],"Historical live ADS-B lookup is not enabled. The timetable is available, but no current position is queried for a past date.");
         $("connection").textContent="Timetable loaded · live registration lookup is only available for today";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
