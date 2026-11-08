@@ -61,6 +61,8 @@
   const initialBerlin=localParts(now,"Europe/Berlin");
   const today=initialBerlin.year+"-"+initialBerlin.month+"-"+initialBerlin.day;
   const initialDutyDate=Number(initialBerlin.hour)<3?new Date(Date.UTC(Number(initialBerlin.year),Number(initialBerlin.month)-1,Number(initialBerlin.day)-1)).toISOString().slice(0,10):today;
+  $("flightDate").min = offsetCalendarDay(today,-7);
+  $("flightDate").max = today;
   $("flightDate").value = initialDutyDate;
   try {
     const lastRoute=localStorage.getItem(LAST_ROUTE_KEY);
