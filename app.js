@@ -54,7 +54,7 @@
     RAK:{name:"Marrakech",tz:"Africa/Casablanca",lat:31.6069,lon:-8.0363}
   };
 
-  const state = { flights:[], candidates:[], selected:null, inboundAircraft:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null };
+  const state = { flights:[], candidates:[], selected:null, inboundAircraft:null, aircraftChange:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null };
   const now = new Date();
   $("flightDate").value = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
 
@@ -299,6 +299,52 @@
     const flight=makeFlight(origin,destination,row.flightNumber||"INBOUND",times.dep,times.arr,times.depDate,times.arrDate,times.estimated,"Nuremberg Airport daily board");
     Object.assign(flight,{boardRegistration:row.registration||"",boardStatus:row.status||"",boardScheduledTime:row.scheduledLocalTime||arrival,boardDirection:"arrival"});
     return flight;
+  }
+  function liveEtaToAirport(ac,destinationCode,requireHeading=false) {
+    const destination=airport(destinationCode), lat=numeric(ac?.lat), lon=numeric(ac?.lon), speed=numeric(ac?.gs);
+    if(!destination||lat===null||lon===null||speed===null||speed<100||ac?.alt_baro==="ground")return null;
+    const position={lat,lon}, distance=hav(position,destination), track=numeric(ac?.track);
+    if(distance<3)return null;
+    const requiredBearing=bearing(position,destination);
+    if(requireHeading&&(track===null||angleDiff(track,requiredBearing)>65))return null;
+    const minutes=Math.max(1,Math.round(distance/speed*60));
+    return {eta:new Date(Date.now()+minutes*60000),minutes,distance,track,bearing:requiredBearing};
+  }
+  async function findAircraftChange(current,registrationCache) {
+    state.aircraftChange=null;
+    if(!current?.flight||!current?.aircraft||!state.dailyBoard?.flights?.length)return null;
+    const now=Date.now(), destination=current.flight.destination;
+    const next=state.flights.filter(f=>f.origin===destination&&f.departure.getTime()>current.flight.departure.getTime()&&f.departure.getTime()<current.flight.arrival.getTime()+10*3600000)
+      .sort((a,b)=>a.departure-b.departure)[0];
+    if(!next)return null;
+    const currentReg=String(current.aircraft.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    const row=boardRowForFlight(next);
+    const nextReg=String(row?.registration||next.boardRegistration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    if(!nextReg||nextReg===currentReg)return null;
+    const boyEta=liveEtaToAirport(current.aircraft,destination,false);
+    if(!boyEta)return null;
+    const result=await identifyFlightByRegistration(next,registrationCache), ac=result.aircraft;
+    if(!ac||ac.boardOnly||!validAircraft(ac))return null;
+    const inboundEta=liveEtaToAirport(ac,destination,true);
+    const altitude=numeric(ac.alt_baro), speed=numeric(ac.gs);
+    if(!inboundEta||altitude===null||altitude<1500||speed===null||speed<100)return null;
+    const difference=Math.round((inboundEta.eta-boyEta.eta)/60000);
+    state.aircraftChange={destination,nextFlight:next,aircraft:ac,inboundEta,boyEta,difference};
+    return state.aircraftChange;
+  }
+  function renderAircraftChange() {
+    const item=state.aircraftChange;
+    const el=$("aircraftChangeSection");
+    if(!el)return;
+    if(!item){el.hidden=true;return;}
+    const ap=airport(item.destination), ac=item.aircraft, d=item.difference;
+    const arrivalText=Math.abs(d)<=5?"AT ABOUT THE SAME TIME":Math.abs(d)+" MIN "+(d<0?"BEFORE":"AFTER");
+    el.hidden=false;
+    $("aircraftChangeContent").innerHTML=
+      '<div class="notice inbound-heading">THE BOY NEEDS TO DO AN AIRCRAFT CHANGE IN '+esc(ap?.name||item.destination).toUpperCase()+'</div>'+
+      '<div class="flighttop"><div><div class="flightno">'+esc(ac.r||"Registration unavailable")+'</div><div class="route">'+esc(item.nextFlight.flightNumber)+' · '+esc(item.nextFlight.origin)+' → '+esc(item.nextFlight.destination)+'</div><div class="muted">Aircraft assigned to the next sector</div></div><span class="status air">LIVE ADS-B</span></div>'+
+      '<div class="stats"><div class="stat"><small>Registration</small><strong>'+esc(ac.r)+'</strong></div><div class="stat"><small>Aircraft type</small><strong>'+esc(ac.t||"—")+'</strong></div><div class="stat"><small>Call sign · ADS-B</small><strong>'+esc((ac.flight||"").trim()||"Not broadcast")+'</strong></div><div class="stat"><small>Ground speed</small><strong>'+Math.round(numeric(ac.gs))+' kt</strong></div><div class="stat"><small>Estimated arrival · '+esc(item.destination)+'</small><strong>'+esc(fmt(item.inboundEta.eta,ap.tz))+'</strong></div><div class="stat"><small>Boy estimated arrival</small><strong>'+esc(fmt(item.boyEta.eta,ap.tz))+'</strong></div><div class="stat"><small>Aircraft arrival vs boy</small><strong>'+esc(arrivalText)+'</strong></div></div>'+
+      '<div class="notice">The assigned aircraft is airborne and its live ADS-B track is consistent with a flight towards '+esc(item.destination)+'. Its inbound departure airport cannot be confirmed from the registration response alone. ETA comparison uses current great-circle distance and ground speed; wind, routing and speed changes can alter it. The next-sector registration comes from the NUE airport board and is not airline-confirmed.</div>';
   }
   async function findInboundAircraft(targetFlights,registrationCache) {
     state.inboundAircraft=null;
@@ -682,6 +728,7 @@
     const next=flights.find(f=>f.departure>now);
     $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
     $("current").innerHTML=state.selected?renderAircraft(state.selected.flight,state.selected.aircraft):`<div class="empty">No live aircraft selected. The results below distinguish live ADS-B positions from airport-board-only operational status.</div>`;
+    renderAircraftChange();
     const last=storageGet();
     $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST AUTO-MATCHED FLIGHT</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
   }
@@ -740,7 +787,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.googleLinks=[]; placeAutomaticMatch(false); state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
+    state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; renderAircraftChange(); state.googleLinks=[]; placeAutomaticMatch(false); state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
     $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
     $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
     try {
@@ -802,6 +849,7 @@
       const automatic=airborne[0]||ground[0]||null;
       if(automatic)saveSelected(automatic.flight,automatic.aircraft);
       else state.selected=null;
+      if(automatic)await findAircraftChange(automatic,registrationCache);
       if(!automatic)await findInboundAircraft(state.flights,registrationCache);
       const liveCount=final.filter(item=>!item.aircraft.boardOnly).length;
       const boardOnlyCount=final.length-liveCount;
