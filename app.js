@@ -405,7 +405,7 @@
     let inboundLanding=landingEvidenceFromRow(previousRow,destination);
     const inboundHistory=!inboundLanding&&!inboundEta?await observedArrivalForRegistration(nextReg,destination,current.flight.arrival,registrationCache):null;
     const boyTime=boyLanding?.actual||boyEta?.eta||null;
-    const inboundTime=inboundLanding?.actual||inboundHistory?.actual||inboundEta?.eta||null;
+    const inboundTime=inboundLanding?.actual||(inboundHistory?.seen==="ground"?inboundHistory.actual:null)||inboundEta?.eta||null;
     const difference=boyTime&&inboundTime?Math.round((inboundTime-boyTime)/60000):null;
     state.aircraftChange={destination,nextFlight:next,aircraft:ac||{boardOnly:true,r:nextReg},inboundEta,boyEta,boyLanding,inboundLanding,inboundHistory,previousRow,difference,mode:inboundLanding?"board-landed":inboundHistory?"history-landed":inboundEta?"live":"assigned-only"};
     return state.aircraftChange;
