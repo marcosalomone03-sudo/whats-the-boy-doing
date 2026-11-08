@@ -1052,14 +1052,38 @@
     const routeSet=new Set(routes.map(pair=>pair.join("-")));
     const unique=new Map();
     for(const rawFlight of observed){
-      const origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
+      let origin=historicalAirportIata(rawFlight?.from),destination=historicalAirportIata(rawFlight?.to);
+      let from=rawFlight.from?{...rawFlight.from,iata:origin}:null;
+      let to=rawFlight.to?{...rawFlight.to,iata:destination}:null;
+
+      // NUE airport observations often contain only the endpoint seen by the
+      // receiver. Recover the other airport from the historical NUE board,
+      // matching registration and the observed NUE timestamp.
+      if((origin==="NUE"&&!destination)||(!origin&&destination==="NUE")){
+        const reg=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+        const eventSeconds=origin==="NUE"?(from?.time??rawFlight.first_seen??rawFlight.last_seen):(to?.time??rawFlight.last_seen??rawFlight.first_seen);
+        const eventMs=Number(eventSeconds)*1000;
+        if(reg&&Number.isFinite(eventMs)){
+          const candidates=(state.dailyBoard?.flights||[]).filter(row=>{
+            const rowReg=String(row.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+            const pair=origin==="NUE"?[row.origin,row.destination]:[row.origin,row.destination];
+            return rowReg===reg&&routeSet.has(pair.join("-"))&&(origin==="NUE"?row.origin==="NUE":row.destination==="NUE");
+          }).map(row=>({row,time:Date.parse(row.scheduledTime||"")})).filter(item=>Number.isFinite(item.time)&&Math.abs(item.time-eventMs)<=4*3600000)
+            .sort((a,b)=>Math.abs(a.time-eventMs)-Math.abs(b.time-eventMs));
+          const match=candidates[0]?.row;
+          if(match){
+            origin=match.origin;
+            destination=match.destination;
+            from={...(from||{}),iata:origin,airport:from?.airport||"",time:from?.time??null};
+            to={...(to||{}),iata:destination,airport:to?.airport||"",time:to?.time??null};
+          }
+        }
+      }
+
       if(routeSamples.length<5)routeSamples.push(origin+"-"+destination);
       if(!routeSet.has(origin+"-"+destination))continue;
       routeMatchCount++;
-      const flight={...rawFlight,
-        from:rawFlight.from?{...rawFlight.from,iata:origin}:rawFlight.from,
-        to:rawFlight.to?{...rawFlight.to,iata:destination}:rawFlight.to
-      };
+      const flight={...rawFlight,from,to};
       const dep=flight.from?.time!==null&&flight.from?.time!==undefined?Number(flight.from.time)*1000:NaN;
       const arr=flight.to?.time!==null&&flight.to?.time!==undefined?Number(flight.to.time)*1000:NaN;
       const anchor=origin==="NUE"?(Number.isFinite(dep)?dep:arr):(Number.isFinite(arr)?arr:dep);
