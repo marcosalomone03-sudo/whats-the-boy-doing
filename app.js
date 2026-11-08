@@ -992,8 +992,8 @@
         const status=item.arrival?historicalSeenLabel(o.to?.seen):"ARRIVAL NOT OBSERVED";
         const reg=item.registration||"REGISTRATION UNAVAILABLE";
         const aircraft=item.type||"TYPE UNAVAILABLE";
-        const operation=item.nextOperation?'<div class="notice">'+esc(item.nextOperation)+(item.nextRegistration?" · "+esc(item.nextRegistration):"")+'</div>':"";
-        return '<div class="candidate"><div class="flighttop"><div><b>'+esc(item.flightNumber)+' · '+esc(item.origin)+' → '+esc(item.destination)+'</b><small>'+esc(item.callsign||"Callsign unavailable")+' · '+esc(reg)+' · '+esc(aircraft)+'</small></div><span class="status '+(item.arrival?"ground":"none")+'">'+esc(status)+'</span></div>'+
+        const operation=item.nextOperation?'<div class="historical-operation">NEXT OPERATION · '+esc(item.nextOperation)+(item.nextRegistration?" · "+esc(item.nextRegistration):"")+'</div>':"";
+        return '<div class="candidate historical-sector"><div class="flighttop"><div><b>'+esc(item.flightNumber)+' · '+esc(item.origin)+' → '+esc(item.destination)+'</b><small>'+esc(item.callsign||"Callsign unavailable")+' · '+esc(reg)+' · '+esc(aircraft)+'</small></div><span class="status '+(item.arrival?"ground":"none")+'">'+esc(status)+'</span></div>'+
           '<div class="stats"><div class="stat"><small>Observed departure · local</small><strong>'+esc(fromTime)+'</strong><small>'+esc(historicalSeenLabel(o.from?.seen))+'</small></div>'+
           '<div class="stat"><small>Observed arrival · local</small><strong>'+esc(toTime)+'</strong><small>'+esc(historicalSeenLabel(o.to?.seen))+'</small></div>'+
           '<div class="stat"><small>Scheduled departure · local</small><strong>'+esc(scheduledDep)+'</strong></div>'+
