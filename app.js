@@ -612,9 +612,10 @@
     const taxiing=onGround&&speed!==null&&speed>=5;
     const status=onGround?(taxiing?"TAXIING":"ON GROUND"):lowNearDestination?"NEAR DESTINATION · STATUS UNCONFIRMED":altitude!==null?"AIRBORNE":"UNKNOWN";
     const statusClass=onGround||lowNearDestination?"ground":status==="AIRBORNE"?"air":"none";
-    let eta=null, punctualityLabel="", punctualityClass="air", etaLabel="Not available";
+    let eta=null, etaMinutes=null, punctualityLabel="", punctualityClass="air", etaLabel="Not available";
     if(!onGround&&speed!==null&&speed>=100&&Number.isFinite(distanceToDestination)){
       const minutes=Math.max(0,Math.round(distanceToDestination/speed*60));
+      etaMinutes=minutes;
       eta=new Date(Date.now()+minutes*60000);
       etaLabel=fmt(eta,destination.tz);
       const difference=Math.round((eta-flight.arrival)/60000);
@@ -629,7 +630,7 @@
         <div class="stat"><small>Aircraft type</small><strong>${esc(ac.t)}</strong></div>
         <div class="stat"><small>Ground speed</small><strong>${speed===null?"—":Math.round(speed)+" kt"}</strong></div>
         <div class="stat"><small>Altitude</small><strong>${onGround?"GROUND":altitude===null?"—":Math.round(altitude).toLocaleString()+" ft"}</strong></div>
-        <div class="stat"><small>ESTIMATED ARRIVAL · LOCAL</small><strong>${esc(etaLabel)}</strong></div>
+        <div class="stat"><small>ESTIMATED ARRIVAL · LOCAL</small><strong>${esc(etaLabel)}</strong></div><div class="stat"><small>LANDING IN · EST.</small><strong>${etaMinutes===null?"—":etaMinutes+" min"}</strong></div>
       </div><div class="notice">ETA is a simple live estimate from remaining great-circle distance and current ground speed; wind, routing and speed changes can alter it. ADS-B position age: ${Math.round(positionAge(ac))} seconds.</div>`;
   }
   function render() {
