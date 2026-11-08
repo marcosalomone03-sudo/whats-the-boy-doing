@@ -138,11 +138,15 @@ async function nurembergDailyBoard(date){
    const scheduled=row?.scheduledTime||f?.scheduledTime||"";
    const eventStatus=row?.status||f?.status||"";
    const statusTime=eventStatus&&typeof eventStatus==="object"?(eventStatus.time||""):"";
+   const statusLabel=boardText(eventStatus);
+   const actualEvent=/landed|arrived|departed|take.?off|airborne/i.test(statusLabel);
+   const scheduledMs=Date.parse(scheduled),statusMs=Date.parse(statusTime);
+   const delayMinutes=actualEvent&&Number.isFinite(scheduledMs)&&Number.isFinite(statusMs)?Math.round((statusMs-scheduledMs)/60000):null;
    results.push({
     flightNumber,carrierCode:carrier,airlineName:String(f?.airline?.name||row?.airline?.name||""),
     direction:direction==="departures"?"departure":"arrival",origin:from,destination:to,date,
-    scheduledTime:scheduled,scheduledLocalTime:boardClock({scheduledTime:scheduled}),status:boardText(eventStatus),
-    statusTime,statusTimeLocal:statusTime?boardClock({time:statusTime}):"",
+    scheduledTime:scheduled,scheduledLocalTime:boardClock({scheduledTime:scheduled}),status:statusLabel,
+    statusTime,statusTimeLocal:statusTime?boardClock({time:statusTime}):"",delayMinutes,
     registration:String(aircraft?.registration||""),
     aircraftType:String(aircraft?.iata||aircraft?.icao||""),
     codeshares:[f?.airline2?.iata&&f?.number2?String(f.airline2.iata)+String(f.number2):"",f?.airline3?.iata&&f?.number3?String(f.airline3.iata)+String(f.number3):""].filter(Boolean),
