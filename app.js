@@ -757,6 +757,14 @@
     state.selected={flight,aircraft};
   }
   function minuteWords(value) { return String(Math.max(0,Math.round(value))); }
+  function flightPhase(ac,distanceToDestination,onGround) {
+    if(onGround)return {icon:"🔄",label:"TURNAROUND",className:"ground"};
+    const altitude=numeric(ac.alt_baro),verticalRate=numeric(ac.baro_rate);
+    if(altitude!==null&&altitude<=10000&&verticalRate!==null&&verticalRate>250)return {icon:"🛫",label:"CLIMB",className:"air"};
+    if(altitude!==null&&altitude<=12000&&((verticalRate!==null&&verticalRate< -250)||(Number.isFinite(distanceToDestination)&&distanceToDestination<=35)))return {icon:"🛬",label:"LANDING",className:"air"};
+    if(altitude!==null&&altitude>=20000&&(verticalRate===null||Math.abs(verticalRate)<700))return {icon:"✈️",label:"CRUISE",className:"air"};
+    return {icon:"✈️",label:"AIRBORNE",className:"air"};
+  }
   function renderAircraft(flight,ac) {
     const onGround=ac.alt_baro==="ground";
     const altitude=numeric(ac.alt_baro), speed=numeric(ac.gs), lat=numeric(ac.lat), lon=numeric(ac.lon);
@@ -767,6 +775,7 @@
     const taxiing=onGround&&speed!==null&&speed>=5;
     const status=onGround?(taxiing?"TAXIING":"ON GROUND"):lowNearDestination?"NEAR DESTINATION · STATUS UNCONFIRMED":altitude!==null?"AIRBORNE":"UNKNOWN";
     const statusClass=onGround||lowNearDestination?"ground":status==="AIRBORNE"?"air":"none";
+    const phase=flightPhase(ac,distanceToDestination,onGround);
     let eta=null, etaMinutes=null, punctualityLabel="", punctualityClass="air", etaLabel="Not available";
     if(!onGround&&speed!==null&&speed>=100&&Number.isFinite(distanceToDestination)){
       const minutes=Math.max(0,Math.round(distanceToDestination/speed*60));
@@ -778,7 +787,7 @@
       else if(difference<0)punctualityLabel=minuteWords(Math.abs(difference))+" EARLY";
       else {punctualityLabel=minuteWords(difference)+" LATE";punctualityClass="late";}
     }
-    return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><div class="status-stack"><span class="status ${statusClass}">${status}</span>${punctualityLabel?`<span class="status ${punctualityClass}">${esc(punctualityLabel)}</span>`:""}</div></div><div class="notice">${ac.boardEvidence?"DAILY BOARD REGISTRATION MATCH — "+esc(ac.boardEvidence.registration)+". ":""}Live ADS-B reports the aircraft ${onGround?(taxiing?"on the surface and moving at "+Math.round(speed||0)+" kt":"on the surface"):"airborne"}. Registration and HEX are read from the transponder feed. The airport board assignment is not airline-confirmed.</div>
+    return `<div class="flighttop"><div><div style="display:flex;align-items:center;gap:9px"><span style="font-size:30px;line-height:1" aria-label="${esc(phase.label)}">${phase.icon}</span><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="muted" style="font-weight:700;letter-spacing:.08em">${esc(phase.label)}</div></div></div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><div class="status-stack"><span class="status ${statusClass}">${status}</span>${punctualityLabel?`<span class="status ${punctualityClass}">${esc(punctualityLabel)}</span>`:""}</div></div><div class="notice">${ac.boardEvidence?"DAILY BOARD REGISTRATION MATCH — "+esc(ac.boardEvidence.registration)+". ":""}Live ADS-B reports the aircraft ${onGround?(taxiing?"on the surface and moving at "+Math.round(speed||0)+" kt":"on the surface"):"airborne"}. Registration and HEX are read from the transponder feed. The airport board assignment is not airline-confirmed.</div>
       <div class="stats">
         <div class="stat"><small>Call sign · ADS-B</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
         <div class="stat"><small>Registration</small><strong>${esc(ac.r)}</strong></div>
@@ -800,7 +809,7 @@
       :item.eta
       ?"The aircraft is estimated to land in "+item.eta.minutes+" minutes."
       :"The aircraft landing time is not yet available.";
-    return '<div class="notice inbound-heading">THE BOY IS DOING TURNAROUND</div><div class="notice">'+esc(arrivalText)+'</div><div class="stats">'+landingLine+'<div class="stat"><small>Estimated departure · timetable</small><strong>'+esc(fmt(item.nextFlight.departure,ap.tz))+'</strong></div><div class="stat"><small>Next sector</small><strong>'+esc(item.nextFlight.flightNumber)+' · '+esc(item.nextFlight.origin)+' → '+esc(item.nextFlight.destination)+'</strong></div></div><div class="notice">Same aircraft registration '+esc(item.registration)+' is assigned to the next sector. Estimated departure is the scheduled timetable departure, not a live take-off prediction.</div>';
+    return '<div class="notice inbound-heading">🔄 THE BOY IS DOING TURNAROUND</div><div class="notice">'+esc(arrivalText)+'</div><div class="stats">'+landingLine+'<div class="stat"><small>Estimated departure · timetable</small><strong>'+esc(fmt(item.nextFlight.departure,ap.tz))+'</strong></div><div class="stat"><small>Next sector</small><strong>'+esc(item.nextFlight.flightNumber)+' · '+esc(item.nextFlight.origin)+' → '+esc(item.nextFlight.destination)+'</strong></div></div><div class="notice">Same aircraft registration '+esc(item.registration)+' is assigned to the next sector. Estimated departure is the scheduled timetable departure, not a live take-off prediction.</div>';
   }
   function render() {
     const flights=[...state.flights].sort((a,b)=>a.departure-b.departure), now=new Date();
@@ -808,7 +817,9 @@
     $("sectors").innerHTML=(flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)} · ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small></div><div class="time"><small>${f.departureEstimated?"EST. ":""}DEP · ${esc(f.origin)}</small>${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>${f.arrivalEstimated?"EST. ":""}ARR · ${esc(f.destination)}</small>${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`)+(missingGoogleLinks.length?`<div class="notice">Google fallback searches (only routes without a scheduled result): ${missingGoogleLinks.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.route)} ↗</a>`).join(" · ")}</div>`:"");
     $("sectorCount").textContent=flights.length+" SECTORS";
     const next=state.aircraftChange?.nextFlight||state.turnaround?.nextFlight||flights.find(f=>f.departure>now);
-    $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty"><strong>YAY, THE BOY IS COMING BACK HOME! 🏡</strong><br>THE DAY IS FINISHED · FEIERABEND</div>`;
+    const lastSector=flights[flights.length-1];
+    const selectedIsLastSector=!!(state.selected&&lastSector&&state.selected.flight.flightNumber===lastSector.flightNumber&&state.selected.flight.date===lastSector.date&&state.selected.flight.origin===lastSector.origin&&state.selected.flight.destination===lastSector.destination);
+    $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:selectedIsLastSector?`<div class="empty"><strong>YAY, THE BOY IS COMING BACK HOME! 🏡</strong><br>THE DAY IS FINISHED · FEIERABEND</div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
     $("current").innerHTML=state.selected?(state.selected.aircraft?.boardOnly||landingEvidence(state.selected.flight,state.selected.aircraft)?renderBoardLanding(state.selected.flight,state.selected.aircraft):renderAircraft(state.selected.flight,state.selected.aircraft))+(state.turnaround?renderTurnaround(state.selected.flight,state.turnaround):""):`<div class="empty">No live aircraft selected. The results below distinguish live ADS-B positions from airport-board-only operational status.</div>`;
     renderAircraftChange();
     const last=storageGet();
