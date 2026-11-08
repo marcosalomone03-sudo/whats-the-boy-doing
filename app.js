@@ -284,7 +284,28 @@
     const next=rows.find(x=>x.origin===target.destination&&Date.parse(x.scheduledTime)>targetTime)||null;
     const opposite=state.dailyBoard.flights.find(x=>x.origin===target.destination&&x.destination===target.origin&&Math.abs(Date.parse(x.scheduledTime)-targetTime)<18*3600000)||null;
     const oppositeReg=String(opposite?.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-    return {registration:reg,flightNumber:target.flightNumber,previousFlight:previous?.flightNumber||null,nextFlight:next?.flightNumber||null,nextRegistration:next?.registration||null,destinationSwap:!!(opposite&&oppositeReg!==reg),oppositeFlight:opposite?.flightNumber||null,oppositeRegistration:opposite?.registration||null,source:"Nuremberg Airport daily board"};
+    return {registration:reg,flightNumber:target.flightNumber,targetRow:target,previousRow:previous,nextRow:next,previousFlight:previous?.flightNumber||null,nextFlight:next?.flightNumber||null,nextRegistration:next?.registration||null,destinationSwap:!!(opposite&&oppositeReg!==reg),oppositeFlight:opposite?.flightNumber||null,oppositeRegistration:opposite?.registration||null,source:"Nuremberg Airport daily board"};
+  }
+  function boardRowForFlight(flight) {
+    return state.dailyBoard?.flights?.find(x=>x.flightNumber===flight.flightNumber&&x.origin===flight.origin&&x.destination===flight.destination)||null;
+  }
+  async function identifyFlightByRegistration(flight) {
+    const row=boardRowForFlight(flight);
+    const registration=String(row?.registration||flight.boardRegistration||"").trim();
+    const boardEvidence=registration?boardRegistrationEvidence(flight,registration):null;
+    const boardRow=row||{flightNumber:flight.flightNumber,origin:flight.origin,destination:flight.destination,direction:flight.origin==="NUE"?"departure":"arrival",registration,status:flight.boardStatus||"Not reported",scheduledLocalTime:flight.boardScheduledTime||flight.departureLocal||"",statusTimeLocal:flight.boardActualTime||flight.boardEstimatedTime||""};
+    if(!registration)return {flight,aircraft:{boardOnly:true,boardReason:row?"The airport board has not published an aircraft registration for this flight.":"No matching registration was available from the Nuremberg board.",boardRow,boardEvidence:null}};
+    try {
+      const ac=await get("/api/registration?reg="+encodeURIComponent(registration));
+      if(ac?.notSeen)return {flight,aircraft:{boardOnly:true,boardReason:"FlyItalyADSB is not currently receiving this registration. This alone does not establish whether the aircraft is parked, switched off or outside receiver coverage.",boardRow,boardEvidence,r:registration,t:row?.aircraftType||flight.boardAircraftType||null}};
+      const returnedReg=String(ac?.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      const requestedReg=registration.toUpperCase().replace(/[^A-Z0-9]/g,"");
+      if(returnedReg!==requestedReg)return {flight,aircraft:{boardOnly:true,boardReason:"The ADS-B response did not match the registration assigned by the airport board.",boardRow,boardEvidence,r:registration}};
+      if(!validAircraft(ac))return {flight,aircraft:{boardOnly:true,boardReason:"FlyItalyADSB returned no sufficiently fresh position for this registration.",boardRow,boardEvidence,r:registration,t:ac?.t||row?.aircraftType||null}};
+      return {flight,aircraft:{...ac,boardEvidence,boardRow,liveVerified:true,operatorMatch:true,operatorName:"Nuremberg Airport board registration",onGround:ac.alt_baro==="ground",seenPos:positionAge(ac),score:100,crossTrack:null}};
+    } catch(error) {
+      return {flight,aircraft:{boardOnly:true,boardReason:"The direct ADS-B registration lookup failed: "+(error?.message||"unknown error"),boardRow,boardEvidence,r:registration,t:row?.aircraftType||flight.boardAircraftType||null}};
+    }
   }
   async function loadNuePool(date) {
     try { const data=await get("/api/pool?date="+encodeURIComponent(date)); state.pool=data?.aircraft||null; return data; }
@@ -614,30 +635,33 @@
     const last=storageGet();
     $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST MANUAL SELECTION</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
   }
-  function renderCandidates(items,message="No reliable Ryanair aircraft match found for the selected date, route and time.") {
+  function renderCandidates(items,message="No flight or aircraft status found for the selected date and route.") {
     const el=$("candidates");
     if (!items.length) { el.className="empty"; el.textContent=message; return; }
     el.className="candidate-list";
     el.innerHTML=items.map((item,i)=>{
       const f=item.flight, ac=item.aircraft;
       const dateLabel=new Intl.DateTimeFormat("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(`${f.date}T12:00:00Z`));
-      const historical=!!ac.historicalOnly;
-      const confidence=historical?(ac.observedBothEnds?"OBSERVED BOTH ENDS":"PARTIAL OBSERVATION"):(ac.operatorMatch?"RYANAIR GROUP REGISTRY MATCH":"POSSIBLE ONLY");
-      const confidenceClass="none";
-      const type=ac.t||"Type not broadcast";
-      const call=(ac.flight||"").trim()||"Callsign not broadcast";
       const dep=fmt(f.departure,airport(f.origin).tz), arr=fmt(f.arrival,airport(f.destination).tz);
-      const poolEvidence=ac.poolMatch?" · IN RECENT NUE AREA POOL":" · NOT IN RECENT NUE AREA POOL";
-      const continuity=ac.turnaroundEvidence?" · SAME-HEX TURNAROUND OBSERVED: "+esc(ac.turnaroundEvidence.inboundFlight)+" → "+esc(f.flightNumber):" · NO SAME-HEX TURNAROUND OBSERVATION";
-      const boardChain=ac.boardEvidence?" · AIRPORT BOARD REGISTRATION MATCH: "+esc(ac.boardEvidence.registration)+(ac.boardEvidence.previousFlight?" · PREVIOUS "+esc(ac.boardEvidence.previousFlight):"")+(ac.boardEvidence.nextFlight?" · NEXT "+esc(ac.boardEvidence.nextFlight):"")+(ac.boardEvidence.destinationSwap?" · AIRCRAFT SWAP AT "+esc(f.destination)+": "+esc(ac.boardEvidence.oppositeFlight)+" assigned "+esc(ac.boardEvidence.oppositeRegistration):""):"";
-      const evidence=historical?`${esc(ac.observedCheckpoints)} · ${esc((ac.observedTimes||[]).join(", "))} · ${ac.historicalPositions||0} historical positions · FlyItalyADSB`:`${Math.round(numeric(ac.seen)||0)}s ago · ${Math.round(ac.crossTrack)} NM cross-track${ac.operatorMatch?" · aircraft registry identifies Ryanair Group":ac.possibleOnly?" · EI/9H/SP registration prefix only; operator unconfirmed":""} · SOURCE ${esc(f.source||"Schedule")}`+continuity+boardChain+poolEvidence;
-      const action=historical?"":`<button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button>`;
-      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${f.departureEstimated?"~":""}${esc(dep)} (${esc(f.origin)}) · ARR ${f.arrivalEstimated?"~":""}${esc(arr)} (${esc(f.destination)})</small></div><span class="status ${confidenceClass}">${esc(confidence)} · NOT VERIFIED</span></div><small>${esc(call)} · ${esc(type)} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · OWNER ${esc(ac.operatorName||"Ryanair Group registry match")} · ${evidence}${historical?" · NOT AIRLINE-CONFIRMED":""}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small>${action}</div>`;
+      if(ac.boardOnly){
+        const row=ac.boardRow||{},ev=ac.boardEvidence||{};
+        const time=x=>x?.scheduledLocalTime||x?.statusTimeLocal||"time unavailable";
+        const previous=ev.previousRow?(`PREVIOUS: ${ev.previousRow.flightNumber} ${ev.previousRow.origin}→${ev.previousRow.destination} · ${time(ev.previousRow)} · ${ev.previousRow.status||"status unavailable"}`):"";
+        const next=ev.nextRow?(`NEXT: ${ev.nextRow.flightNumber} ${ev.nextRow.origin}→${ev.nextRow.destination} · ${time(ev.nextRow)} · ${ev.nextRow.status||"status unavailable"}`):"";
+        const boardStatus=[row.status||"Status unavailable",row.statusTimeLocal?"status time "+row.statusTimeLocal:"",row.scheduledLocalTime?"scheduled "+row.scheduledLocalTime:""].filter(Boolean).join(" · ");
+        const swap=ev.destinationSwap?"<br>Different registration assigned to the opposite-direction sector: "+esc(ev.oppositeFlight)+" · "+esc(ev.oppositeRegistration):"";
+        return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${esc(dep)} · ARR ${esc(arr)}</small></div><span class="status none">AIRPORT BOARD ONLY</span></div><small>BOARD REGISTRATION: ${esc(ac.r||row.registration||"Not published")} · BOARD STATUS: ${esc(boardStatus)}<br>ADS-B: ${esc(ac.boardReason)}<br>${esc(previous)}<br>${esc(next)}${swap}<br>Source: Nuremberg Airport. No live aircraft position is being claimed.</small></div>`;
+      }
+      const confidence="LIVE ADS-B · BOARD REGISTRATION MATCH";
+      const boardChain=ac.boardEvidence?" · AIRPORT BOARD REGISTRATION "+esc(ac.boardEvidence.registration)+(ac.boardEvidence.previousFlight?" · PREVIOUS "+esc(ac.boardEvidence.previousFlight):"")+(ac.boardEvidence.nextFlight?" · NEXT "+esc(ac.boardEvidence.nextFlight):"")+(ac.boardEvidence.destinationSwap?" · SWAP AT "+esc(f.destination)+": "+esc(ac.boardEvidence.oppositeFlight)+" assigned "+esc(ac.boardEvidence.oppositeRegistration):""):"";
+      const evidence=`${Math.round(positionAge(ac))}s since last position · ${esc(ac.source||"FlyItalyADSB")}${boardChain}`;
+      const action=`<button class="secondary" data-pick="${i}">SELECT AIRCRAFT</button>`;
+      return `<div class="candidate"><div class="flighttop"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(dateLabel)} · DEP ${esc(dep)} · ARR ${esc(arr)}</small></div><span class="status none">${esc(confidence)}</span></div><small>${esc((ac.flight||"").trim()||"Callsign not broadcast")} · ${esc(ac.t||"Type unavailable")} · ${esc(ac.r||"Registration unknown")} · HEX ${esc(ac.hex)} · GS ${numeric(ac.gs)===null?"—":Math.round(numeric(ac.gs))+" kt"} · ALT ${ac.alt_baro==="ground"?"GROUND":numeric(ac.alt_baro)===null?"—":Math.round(numeric(ac.alt_baro))+" ft"} · ${evidence}<br>Position is live ADS-B data. Flight-to-aircraft assignment comes from the Nuremberg Airport board and is not airline-confirmed.</small>${action}</div>`;
     }).join("");
     el.querySelectorAll("[data-pick]").forEach(button=>button.addEventListener("click",()=>{
-      const item=items[Number(button.dataset.pick)]; if(!item)return;
+      const item=items[Number(button.dataset.pick)]; if(!item||item.aircraft.boardOnly)return;
       saveSelected(item.flight,item.aircraft); render();
-      $("connection").textContent="Possible aircraft selected manually · not flight-confirmed";
+      $("connection").textContent="Live aircraft selected · registration matched to the Nuremberg Airport board";
     }));
   }
 
@@ -665,9 +689,8 @@
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
     state.flights=[]; state.candidates=[]; state.selected=null; state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
-
-    $("candidates").className="empty"; $("candidates").textContent="Checking whether an aircraft can be linked to an inbound NUE arrival and the next outbound departure…";
-    $("connection").textContent="Checking timetable…"; $("lastUpdated").textContent="SEARCHING";
+    $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
+    $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
     try {
       const boardResult=await loadDailyBoard(date).catch(error=>{console.warn("Daily NUE board unavailable",error);return null;});
       const responses=await Promise.allSettled(routes.map(([o,d])=>loadRoute(o,d,date)));
@@ -685,65 +708,47 @@
       }
       const deviceNow=new Date();
       const today=[deviceNow.getFullYear(),String(deviceNow.getMonth()+1).padStart(2,"0"),String(deviceNow.getDate()).padStart(2,"0")].join("-");
-      if (date !== today) {
-        renderCandidates([],"Historical ADS-B candidate reconstruction is not enabled. No future airport observations are queried.");
-        $("connection").textContent="Timetable loaded · live ADS-B is only available for today";
+      if(date!==today){
+        renderCandidates([],"Historical live ADS-B lookup is not enabled. The timetable is available, but no current position is queried for a past date.");
+        $("connection").textContent="Timetable loaded · live registration lookup is only available for today";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
-        if (scheduleErrors.length) showError(scheduleErrors.join("\\n"));
+        if(scheduleErrors.length)showError(scheduleErrors.join("\\n"));
         return;
       }
       const nowMs=Date.now();
-      // Track from 3 hours before scheduled departure until 3 hours after scheduled arrival,
-      // allowing delayed flights to remain eligible for live ADS-B matching.
       const searchFlights=state.flights.filter(f=>nowMs>=f.departure.getTime()-180*60000&&nowMs<=f.arrival.getTime()+180*60000);
-      if (!searchFlights.length) {
-        renderCandidates([],"No flight is inside the live tracking window. No future observations were requested.");
-        $("connection").textContent="Timetable loaded · no flight inside live window";
+      if(!searchFlights.length){
+        renderCandidates([],"No selected-route flight is within three hours of its scheduled departure or arrival. The daily board was loaded, but no ADS-B registration was queried.");
+        $("connection").textContent="Timetable loaded · no flight inside the live tracking window";
         $("lastUpdated").textContent="SCHEDULE UPDATED";
-        if (scheduleErrors.length) showError(scheduleErrors.join("\\n"));
+        if(scheduleErrors.length)showError(scheduleErrors.join("\\n"));
         return;
       }
-      // Collect airport observations before ranking. Same-HEX continuity is supporting evidence only.
-      $("connection").textContent="Timetable loaded · checking airport observations and live ADS-B…";
-      await loadObserved(date);
-      const pool=await loadNuePool(date);
-      $("connection").textContent=pool?"Timetable loaded · NUE recent-aircraft pool loaded · filtering live ADS-B…":"Timetable loaded · NUE pool unavailable; using live ADS-B only…";
-      const all=[]; const adsbErrors=[];
-      const found=await Promise.allSettled(searchFlights.map(f=>findCandidates(f)));
-      found.forEach((r,i)=>{ if(r.status==="fulfilled")all.push(...r.value.map(ac=>({flight:searchFlights[i],aircraft:ac}))); else adsbErrors.push(`${searchFlights[i].origin}-${searchFlights[i].destination}: ${r.reason?.message||"ADS-B unavailable"}`); });
-      // One aircraft (one ICAO HEX) can appear only once in the final shortlist.
-      const unique=new Map();
-      for (const item of all) {
-        const key=String(item.aircraft.hex).toLowerCase();
-        item.aircraft.turnaroundEvidence=turnaroundEvidence(item.flight,key);
-        item.aircraft.boardEvidence=boardRegistrationEvidence(item.flight,item.aircraft.r);
-        const old=unique.get(key);
-        const rank=(x)=>(x.aircraft.turnaroundEvidence?100000:0)+(x.aircraft.poolMatch?5000:0)+x.aircraft.score;
-        if(!old||rank(item)>rank(old))unique.set(key,item);
-      }
-      // Require registry-confirmed Ryanair Group ownership, a live on-ground aircraft at NUE,
-      // and an official daily-board registration match. Same-HEX turnaround observations
-      // remain additional evidence, but are not mandatory when the board identifies a swap.
-      const final=[...unique.values()].filter(item=>item.flight.origin==="NUE"&&item.aircraft.onGround&&item.aircraft.operatorMatch&&item.aircraft.boardEvidence)
-        .sort((a,b)=>(b.aircraft.turnaroundEvidence?100000:0)+b.aircraft.score-((a.aircraft.turnaroundEvidence?100000:0)+a.aircraft.score)).slice(0,3);
+      $("connection").textContent="NUE board registrations found · querying FlyItalyADSB by registration…";
+      const results=await Promise.allSettled(searchFlights.map(f=>identifyFlightByRegistration(f)));
+      const final=[];
+      const lookupErrors=[];
+      results.forEach((r,i)=>{
+        if(r.status==="fulfilled")final.push(r.value);
+        else lookupErrors.push(`${searchFlights[i].flightNumber}: ${r.reason?.message||"registration lookup failed"}`);
+      });
       state.candidates=final;
-      // If the same registered aircraft is linked across the inbound and outbound
-      // legs and ADS-B shows it moving on the ground, select it automatically.
-      const taxiingMatch=final.find(item=>numeric(item.aircraft.gs)!==null&&numeric(item.aircraft.gs)>=5);
-      if(taxiingMatch) saveSelected(taxiingMatch.flight,taxiingMatch.aircraft);
+      const taxiingMatch=final.find(item=>!item.aircraft.boardOnly&&item.flight.origin==="NUE"&&item.aircraft.onGround&&numeric(item.aircraft.gs)!==null&&numeric(item.aircraft.gs)>=5);
+      if(taxiingMatch)saveSelected(taxiingMatch.flight,taxiingMatch.aircraft);
       else state.selected=null;
-      renderCandidates(final,final.length?"Aircraft matched to the official NUE daily board by registration, with live ADS-B and registry checks. Aircraft swaps are evaluated as separate registrations.":adsbErrors.length?"ADS-B service could not complete the search. No aircraft assignment is shown.":boardResult?"No live on-ground aircraft with a registry-confirmed identity matched the daily board registration.":"Daily NUE board unavailable; no board-based aircraft assignment can be confirmed.");
-      // Never silently restore a previously selected aircraft after a fresh search.
+      const liveCount=final.filter(item=>!item.aircraft.boardOnly).length;
+      const boardOnlyCount=final.length-liveCount;
+      renderCandidates(final,final.length?"":"No board or ADS-B result was available for the selected route.");
       render();
       $("lastUpdated").textContent="UPDATED "+fmt(new Date(),"Europe/Berlin");
-      $("connection").textContent=final.length?`${final.length} daily-board registration match(es) · live ADS-B checked, not airline-confirmed`:boardResult?"No verified daily-board aircraft match":"Daily NUE board unavailable";
-      if (scheduleErrors.length||adsbErrors.length) showError([...scheduleErrors,...adsbErrors].join("\\n"));
+      $("connection").textContent=`${liveCount} live registration match(es) · ${boardOnlyCount} airport-board-only status(es) · no geographic aircraft matching`;
+      if(scheduleErrors.length||lookupErrors.length)showError([...scheduleErrors,...lookupErrors].join("\\n"));
+      if(!boardResult)$("connection").textContent+=" · full daily board unavailable; route timetable fallback used";
     } catch(e) {
       showError(e.message||"Unable to load flight data."); $("connection").textContent="Unable to load flight data";
       renderCandidates([],"Search failed. Check the error message above and try again.");
     } finally { button.disabled=false; button.textContent="REFRESH DUTY & AIRCRAFT ↗"; }
   }
-
   $("track").addEventListener("click",run);
   $("route").addEventListener("input",event=>{event.target.value=event.target.value.toUpperCase();});
   $("route").addEventListener("keydown",event=>{if(event.key==="Enter")run();});
