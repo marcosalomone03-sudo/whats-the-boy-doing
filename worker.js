@@ -363,7 +363,14 @@ export default {
     if(!/^[0-9a-f]{6}$/.test(icao)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||date>new Date().toISOString().slice(0,10))return cors(JSON.stringify({error:"Invalid aircraft history parameters"}),400,{"Content-Type":"application/json"});
     const upstream=await fetch("https://api.flyitalyadsb.com/v2/history/"+icao+"/"+date,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/13.0"}});
     const body=await upstream.text();
-    return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"no-store","X-WTBD-History-Source":upstream.headers.get("X-History-Source")||"FlyItalyADSB"});
+    let responseBody=body;
+    try{
+     const payload=JSON.parse(body);
+     if(payload&&typeof payload==="object"&&!Array.isArray(payload)){
+      responseBody=JSON.stringify({...payload,_wtbdDiagnostic:{historySource:upstream.headers.get("X-History-Source"),upstreamStatus:upstream.status}});
+     }
+    }catch{}
+    return cors(responseBody,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"no-store","X-WTBD-History-Source":upstream.headers.get("X-History-Source")||"FlyItalyADSB"});
    }
    if(u.pathname==="/api/observed" || u.pathname==="/api/overflights"){
     if(!env.FLYITALYADSB_API_KEY)return cors(JSON.stringify({error:"FLYITALYADSB_API_KEY secret is not configured on this Worker."}),503,{"Content-Type":"application/json"});
