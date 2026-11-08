@@ -864,13 +864,13 @@
       if(/cancel|divert/i.test(String(row.status||"")))return false;
       const scheduled=Date.parse(row.scheduledTime||"");
       const actual=Date.parse(row.statusTime||"");
-      const actualStatus=/departed|take.?off|airborne|landed|arrived/i.test(String(row.status||""));
+      const actualStatus=/departed|take.?off|airborne|landed|arrived|started/i.test(String(row.status||""));
       const eventMs=actualStatus&&Number.isFinite(actual)?actual:scheduled;
       return Number.isFinite(eventMs)&&eventMs<=nowMs+10*60000;
     }).map(row=>{
       const actual=Date.parse(row.statusTime||"");
       const scheduled=Date.parse(row.scheduledTime||"");
-      const actualStatus=/departed|take.?off|airborne|landed|arrived/i.test(String(row.status||""));
+      const actualStatus=/departed|take.?off|airborne|landed|arrived|started/i.test(String(row.status||""));
       const eventMs=actualStatus&&Number.isFinite(actual)?actual:scheduled;
       return {
         day:row.date||new Date(eventMs).toISOString().slice(0,10),
