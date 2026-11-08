@@ -1165,7 +1165,7 @@
       const key=[flight.icao||"",origin,destination,Number.isFinite(dep)?dep:"",Number.isFinite(arr)?arr:""].join("|");
       unique.set(key,flight);
     }
-    const rows=[...unique.values()].map(observedFlight=>{
+    const candidateRows=[...unique.values()].map(observedFlight=>{
       const scheduleMatch=historicalScheduleMatch(observedFlight);
       const schedule=scheduleMatch?.flight||null;
       const departure=observedFlight.from?.time!==null&&observedFlight.from?.time!==undefined&&Number.isFinite(Number(observedFlight.from.time))?new Date(Number(observedFlight.from.time)*1000):null;
@@ -1174,7 +1174,24 @@
       return {observed:observedFlight,schedule,board:scheduleMatch?.board||null,origin:String(observedFlight.from?.iata||"").toUpperCase(),destination:String(observedFlight.to?.iata||"").toUpperCase(),
         departure,arrival,delayMinutes,registration:String(observedFlight.r||"").trim(),type:String(observedFlight.t||"").trim(),
         callsign:String(observedFlight.callsign||"").trim(),flightNumber:schedule?.flightNumber||String(observedFlight.callsign||"").trim()||"OBSERVED FLIGHT"};
-    }).sort((a,b)=>(a.departure?.getTime()||a.arrival?.getTime()||0)-(b.departure?.getTime()||b.arrival?.getTime()||0));
+    });
+    // A single scheduled sector can appear more than once in receiver data:
+    // for example, one record may capture the arrival and another a later
+    // ground/low-altitude movement by the same aircraft. Keep the observation
+    // closest to the matching scheduled endpoint, rather than counting both
+    // as separate flights or assigning a second delay to the same flight.
+    const bestByScheduledSector=new Map(),unmatchedRows=[];
+    for(const row of candidateRows){
+      if(!row.schedule){unmatchedRows.push(row);continue;}
+      const depDistance=row.departure?Math.abs(row.departure.getTime()-row.schedule.departure.getTime()):Infinity;
+      const arrDistance=row.arrival?Math.abs(row.arrival.getTime()-row.schedule.arrival.getTime()):Infinity;
+      const score=Math.min(depDistance,arrDistance);
+      const key=[row.schedule.date,row.schedule.flightNumber,row.schedule.origin,row.schedule.destination].join("|");
+      const previous=bestByScheduledSector.get(key);
+      if(!previous||score<previous.score)bestByScheduledSector.set(key,{row,score});
+    }
+    const rows=[...unmatchedRows,...[...bestByScheduledSector.values()].map(item=>item.row)]
+      .sort((a,b)=>(a.departure?.getTime()||a.arrival?.getTime()||0)-(b.departure?.getTime()||b.arrival?.getTime()||0));
     for(let i=0;i<rows.length-1;i++){
       const current=rows[i],next=rows[i+1];
       if(current.destination!==next.origin)continue;
