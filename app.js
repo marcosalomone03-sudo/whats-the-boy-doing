@@ -314,6 +314,10 @@
     return {actual:new Date(actualMs),scheduled:scheduled===null?null:new Date(scheduled),delayMinutes:scheduled===null?null:Math.round((actualMs-scheduled)/60000),status:String(row.status||"Landed"),source:"Nuremberg Airport board"};
   }
   function landingEvidence(flight,aircraft) {
+    if(aircraft?.observedLanding?.seen==="ground"){
+      const actual=aircraft.observedLanding.actual;
+      return {actual,scheduled:flight.arrival,delayMinutes:Math.round((actual-flight.arrival)/60000),status:"Ground observation",source:"FlyItalyADSB observed-flight history"};
+    }
     const row=aircraft?.boardEvidence?.targetRow||aircraft?.boardRow||boardRowForFlight(flight);
     const fromRow=landingEvidenceFromRow(row,flight.destination);
     if(fromRow)return fromRow;
@@ -338,9 +342,9 @@
     const registration=aircraft?.r||row.registration||"Not published";
     const type=aircraft?.t||row.aircraftType||flight.boardAircraftType||"—";
     if(!evidence)return '<div class="empty">No live ADS-B position is available. The airport board has not published a confirmed landing time for this flight.</div>';
-    return '<div class="flighttop"><div><div class="flightno">'+esc(flight.flightNumber)+'</div><div class="route">'+esc(flight.origin)+' → '+esc(flight.destination)+'</div><div class="muted">Aircraft registration '+esc(registration)+'</div></div><div class="status-stack"><span class="status ground">LANDED</span><span class="status '+(Number.isFinite(evidence.delayMinutes)&&evidence.delayMinutes>5?"late":"air")+'">'+esc(punctualityText(evidence.delayMinutes))+'</span></div></div>'+
-      '<div class="stats"><div class="stat"><small>Actual landing · local</small><strong>'+esc(fmt(evidence.actual,airport(flight.destination).tz))+'</strong></div><div class="stat"><small>Landed</small><strong>'+esc(minutesAgoText(evidence.actual))+'</strong></div><div class="stat"><small>Scheduled arrival</small><strong>'+esc(fmt(evidence.scheduled||flight.arrival,airport(flight.destination).tz))+'</strong></div><div class="stat"><small>Aircraft type</small><strong>'+esc(type)+'</strong></div></div>'+
-      '<div class="notice">'+(aircraft?.boardOnly?"No live ADS-B position is currently available for this aircraft. ":"The airport board confirms the landing; the last ADS-B response is not being used to estimate the landing time. ")+"Landing time and punctuality are taken from "+esc(evidence.source)+".</div>";
+    return '<div class="flighttop"><div><div class="flightno">'+esc(flight.flightNumber)+'</div><div class="route">'+esc(flight.origin)+' → '+esc(flight.destination)+'</div><div class="muted">Aircraft registration '+esc(registration)+'</div></div><div class="status-stack"><span class="status ground">'+ (String(evidence.source).includes("FlyItalyADSB")?"LANDED · ADS-B HISTORY":"LANDED") +'</span><span class="status '+(Number.isFinite(evidence.delayMinutes)&&evidence.delayMinutes>5?"late":"air")+'">'+esc(punctualityText(evidence.delayMinutes))+'</span></div></div>'+
+      '<div class="stats"><div class="stat"><small>"+(String(evidence.source).includes("FlyItalyADSB")?"Arrival observed · local":"Actual landing · local")+"</small><strong>'+esc(fmt(evidence.actual,airport(flight.destination).tz))+'</strong></div><div class="stat"><small>Landed</small><strong>'+esc(minutesAgoText(evidence.actual))+'</strong></div><div class="stat"><small>Scheduled arrival</small><strong>'+esc(fmt(evidence.scheduled||flight.arrival,airport(flight.destination).tz))+'</strong></div><div class="stat"><small>Aircraft type</small><strong>'+esc(type)+'</strong></div></div>'+
+      '<div class="notice">'+(aircraft?.boardOnly?"No live ADS-B position is currently available for this aircraft. ":"An ADS-B ground observation indicates the aircraft was on the surface near the destination; this is an observed arrival time, not a guaranteed touchdown timestamp. ")+"Landing time and punctuality are taken from "+esc(evidence.source)+".</div>";
   }
   function liveEtaToAirport(ac,destinationCode,requireHeading=false) {
     const destination=airport(destinationCode), lat=numeric(ac?.lat), lon=numeric(ac?.lon), speed=numeric(ac?.gs);
@@ -893,8 +897,18 @@
         return ac.alt_baro==="ground"&&f.origin==="NUE"&&nowMs>=f.departure.getTime()-90*60000&&nowMs<=f.departure.getTime()+20*60000&&lat!==null&&lon!==null&&hav(airport("NUE"),{lat,lon})<=5;
       }).sort((a,b)=>a.flight.departure-b.flight.departure);
       const automatic=airborne[0]||ground[0]||null;
+      let historyLandedCandidate=null;
+      if(!automatic){
+        const possibleHistory=final.filter(item=>!landingEvidence(item.flight,item.aircraft)&&item.flight.arrival.getTime()<=Date.now()+15*60000&&Date.now()-item.flight.arrival.getTime()<=180*60000)
+          .sort((a,b)=>Math.abs(Date.now()-a.flight.arrival.getTime())-Math.abs(Date.now()-b.flight.arrival.getTime())).slice(0,2);
+        for(const item of possibleHistory){
+          const reg=item.aircraft.r||item.aircraft.boardRow?.registration;
+          const history=await observedArrivalForRegistration(reg,item.flight.destination,item.flight.arrival,registrationCache);
+          if(history?.seen==="ground"){item.aircraft.observedLanding=history;historyLandedCandidate=item;break;}
+        }
+      }
       const landedCandidate=automatic?null:final.filter(item=>landingEvidence(item.flight,item.aircraft))
-        .sort((a,b)=>Math.abs(Date.now()-landingEvidence(a.flight,a.aircraft).actual.getTime())-Math.abs(Date.now()-landingEvidence(b.flight,b.aircraft).actual.getTime()))[0]||null;
+        .sort((a,b)=>Math.abs(Date.now()-landingEvidence(a.flight,a.aircraft).actual.getTime())-Math.abs(Date.now()-landingEvidence(b.flight,b.aircraft).actual.getTime()))[0]||historyLandedCandidate;
       if(automatic)saveSelected(automatic.flight,automatic.aircraft);
       else if(landedCandidate)state.selected=landedCandidate;
       else state.selected=null;
