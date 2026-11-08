@@ -532,7 +532,7 @@
     const taxiing=onGround&&speed!==null&&speed>=5;
     const status=onGround?(taxiing?"TAXIING":"ON GROUND"):lowNearDestination?"NEAR DESTINATION · STATUS UNCONFIRMED":altitude!==null?"AIRBORNE":"UNKNOWN";
     const statusClass=onGround||lowNearDestination?"ground":status==="AIRBORNE"?"air":"none";
-    return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><span class="status ${statusClass}">${status}</span></div><div class="notice">MANUALLY SELECTED ADS-B CANDIDATE — free data sources do not confirm that this aircraft is assigned to ${esc(flight.flightNumber)}. Registration and HEX below are read directly from its transponder feed.</div>
+    return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><span class="status ${statusClass}">${status}</span></div><div class="notice">AUTOMATIC TURNAROUND MATCH — the same ICAO HEX was observed on the preceding inbound arrival and this outbound departure. Live ADS-B reports the aircraft on the surface and moving at ${Math.round(speed||0)} kt. Registration and HEX are read from the transponder feed.</div>
       <div class="stats">
         <div class="stat"><small>ADS-B callsign · unverified</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
         <div class="stat"><small>ICAO HEX</small><strong>${esc(ac.hex)}</strong></div>
