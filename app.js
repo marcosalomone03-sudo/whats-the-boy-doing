@@ -416,32 +416,30 @@
       if(!cache.has(trackKey))cache.set(trackKey,get("/api/history?icao="+encodeURIComponent(icao)+"&date="+encodeURIComponent(date)));
       return cache.get(trackKey).catch(()=>null);
     }));
-    const now=Date.now(),landings=[],ap=airport(destination);
+    const ap=airport(destination),now=Date.now(),candidates=[];
+    const rad=x=>x*Math.PI/180;
+    const distanceKm=(lat,lon)=>{
+      const dLat=rad(ap.lat-lat),dLon=rad(ap.lon-lon);
+      const x=Math.sin(dLat/2)**2+Math.cos(rad(lat))*Math.cos(rad(ap.lat))*Math.sin(dLon/2)**2;
+      return 6371*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+    };
     for(const track of tracks){
-      // ADS-B daily trace may stop before a "ground" message is received.
-      // Take the latest low-altitude observation close to the outstation and
-      // add the agreed 3 minutes as the estimated touchdown time.
       const rows=Array.isArray(track?.trace)?track.trace:[];
       const base=Number(track?.timestamp);
-      if(!rows.length||!Number.isFinite(base)||!Number.isFinite(ap?.lat)||!Number.isFinite(ap?.lon))continue;
-      const rad=x=>x*Math.PI/180;
-      const distanceKm=(lat,lon)=>{
-        const dLat=rad(ap.lat-lat),dLon=rad(ap.lon-lon);
-        const x=Math.sin(dLat/2)**2+Math.cos(rad(lat))*Math.cos(rad(ap.lat))*Math.sin(dLon/2)**2;
-        return 6371*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
-      };
-      const candidates=rows.filter(row=>Array.isArray(row)&&row.length>=4)
-        .map(row=>({time:base+Number(row[0]),lat:Number(row[1]),lon:Number(row[2]),alt:Number(row[3])}))
-        .filter(p=>Number.isFinite(p.time)&&Number.isFinite(p.lat)&&Number.isFinite(p.lon)&&Number.isFinite(p.alt)&&p.alt>0&&p.alt<=5000&&distanceKm(p.lat,p.lon)<=35)
-        .sort((a,b)=>b.time-a.time);
-      const event=candidates[0];
-      if(!event)continue;
+      if(!rows.length||!Number.isFinite(base))continue;
+      // Use the final recorded ADS-B position for that day, not an older
+      // low-altitude point selected from elsewhere in the trace.
+      const row=[...rows].reverse().find(x=>Array.isArray(x)&&x.length>=4&&Number.isFinite(Number(x[0]))&&Number.isFinite(Number(x[1]))&&Number.isFinite(Number(x[2]))&&Number.isFinite(Number(x[3])));
+      if(!row)continue;
+      const event={time:base+Number(row[0]),lat:Number(row[1]),lon:Number(row[2]),alt:Number(row[3])};
+      if(!Number.isFinite(event.time)||event.time>now+5*60000||event.alt<0||event.alt>5000)continue;
+      if(!Number.isFinite(ap?.lat)||!Number.isFinite(ap?.lon)||distanceKm(event.lat,event.lon)>35)continue;
       const actual=new Date((event.time+180)*1000);
-      if(actual.getTime()<=now+5*60000&&actual.getTime()>=referenceTime.getTime()-12*3600000)
-        landings.push({actual,scheduled:null,delayMinutes:null,status:"Estimated landing · ADS-B low-altitude trace + 3 min",source:"FlyItalyADSB daily trace"});
+      if(actual.getTime()>=now-24*3600000)
+        candidates.push({actual,scheduled:null,delayMinutes:null,status:"Estimated landing · final ADS-B daily position + 3 min",source:"FlyItalyADSB daily trace"});
     }
-    landings.sort((x,y)=>y.actual.getTime()-x.actual.getTime());
-    return landings[0]||null;
+    candidates.sort((x,y)=>y.actual.getTime()-x.actual.getTime());
+    return candidates[0]||null;
   }
   async function findAircraftChange(current,registrationCache) {
     state.aircraftChange=null;
