@@ -586,6 +586,7 @@
     }
     return `<div class="flighttop"><div><div class="flightno">${esc(flight.flightNumber)}</div><div class="route">${esc(flight.origin)} → ${esc(flight.destination)}</div><div class="muted">${esc(airport(flight.origin)?.name)} · ${esc(airport(flight.destination)?.name)}</div></div><div class="status-stack"><span class="status ${statusClass}">${status}</span>${punctualityLabel?`<span class="status ${punctualityClass}">${esc(punctualityLabel)}</span>`:""}</div></div><div class="notice">${ac.boardEvidence?"DAILY BOARD REGISTRATION MATCH — "+esc(ac.boardEvidence.registration)+". ":""}Live ADS-B reports the aircraft ${onGround?(taxiing?"on the surface and moving at "+Math.round(speed||0)+" kt":"on the surface"):"airborne"}. Registration and HEX are read from the transponder feed. The airport board assignment is not airline-confirmed.</div>
       <div class="stats">
+        <div class="stat"><small>Call sign · ADS-B</small><strong>${esc((ac.flight||"").trim()||"Not broadcast")}</strong></div>
         <div class="stat"><small>Registration</small><strong>${esc(ac.r)}</strong></div>
         <div class="stat"><small>Aircraft type</small><strong>${esc(ac.t)}</strong></div>
         <div class="stat"><small>Ground speed</small><strong>${speed===null?"—":Math.round(speed)+" kt"}</strong></div>
