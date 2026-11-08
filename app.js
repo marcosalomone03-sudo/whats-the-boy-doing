@@ -1152,6 +1152,8 @@
       !boardResult?"The historical NUE airport board was unavailable; timetable matching may be incomplete.":"",
       "FlyItalyADSB airports queried: "+observedAirports.join(", ")+". Airport API records: "+rawObservedCount+" · route matches: "+routeMatchCount+" · duty-window matches: "+windowMatchCount+".",
       "Historical matching diagnostics: "+scheduleRouteRows.length+" timetable sectors · "+(state.dailyBoard?.flights?.length||0)+" NUE board rows · "+inferredFromScheduleCount+" incomplete ADS-B routes inferred.",
+      "NUE board entries: "+(state.dailyBoard?.flights||[]).map(row=>[row.flightNumber,row.origin+"-"+row.destination,row.registration||"REG N/A",row.scheduledTime||row.scheduledLocalTime||"TIME N/A"].join(" ")).join(" | "),
+      "Schedule requests: "+(state.scheduleDiagnostics||[]).map(item=>[item.route,item.date,item.source||"source",item.count??item.flightCount??item.returned??"no count"].join(" ")).join(" | "),
       !windowMatchCount&&rawObservedCount?"Sample observed routes: "+[...new Set(routeSamples)].join(", "):""
     ].filter(Boolean).join(" ");
     renderHistoricalDuty(rows,date,coverageMessage);
