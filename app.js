@@ -388,7 +388,9 @@
     const next=state.flights.filter(f=>f.origin===destination&&f.departure.getTime()>current.flight.departure.getTime()&&f.departure.getTime()<current.flight.arrival.getTime()+10*3600000)
       .sort((a,b)=>a.departure-b.departure)[0];
     if(!next)return null;
-    const currentReg=String(current.aircraft.r||current.aircraft.boardRow?.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    const currentRow=boardRowForFlight(current.flight);
+    const currentReg=String(current.aircraft.r||current.aircraft.boardRow?.registration||currentRow?.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    if(!currentReg)return null;
     const row=boardRowForFlight(next);
     const nextReg=String(row?.registration||next.boardRegistration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
     if(!nextReg)return null;
