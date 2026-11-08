@@ -418,11 +418,14 @@
     }));
     const now=Date.now(),landings=[];
     for(const track of tracks){
-      const event=latestGroundAirportLanding(track);
-      if(event?.airport!==destination||!Number.isFinite(Number(event.time)))continue;
-      const actual=new Date(Number(event.time)*1000);
+      // The DSP trace often stops before the aircraft is reported as "ground".
+      // Use its final low-altitude descending point near the destination and add
+      // the agreed fixed 3-minute touchdown allowance.
+      const event=latestEstimatedAirportLanding(track);
+      if(event?.airport!==destination||!Number.isFinite(Number(event.observedTime)))continue;
+      const actual=new Date((Number(event.observedTime)+180)*1000);
       if(actual.getTime()<=now+5*60000&&actual.getTime()>=referenceTime.getTime()-12*3600000)
-        landings.push({actual,scheduled:null,delayMinutes:null,status:"ADS-B ground observation",source:"FlyItalyADSB daily trace"});
+        landings.push({actual,scheduled:null,delayMinutes:null,status:"Estimated landing · low-altitude trace + 3 min",source:"FlyItalyADSB daily trace"});
     }
     landings.sort((x,y)=>y.actual.getTime()-x.actual.getTime());
     return landings[0]||null;
