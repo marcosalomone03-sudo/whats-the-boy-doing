@@ -1022,10 +1022,9 @@
     const nextDate=addCalendarDay(date);
     const scheduleJobs=routes.flatMap(([origin,destination])=>[date,nextDate].map(day=>({origin,destination,date:day})));
     const airportDates=[date,nextDate];
-    // Query every airport in the requested duty routes, not NUE alone.
-    // The observed-flight API can have coverage at the destination even when
-    // the NUE receivers did not capture the same movement.
-    const observedAirports=[...new Set(routes.flatMap(pair=>pair))];
+    // Historical mode is an airport-wide NUE movement search, not a route-specific
+    // search. Query NUE arrivals and departures so every observed route is eligible.
+    const observedAirports=["NUE"];
     const observedJobs=airportDates.flatMap(day=>observedAirports.flatMap(airportCode=>["arrivals","departures"].map(type=>({day,type,airport:airportCode}))));
     const [scheduleResults,boardResult,observedResults]=await Promise.all([
       Promise.allSettled(scheduleJobs.map(job=>loadRoute(job.origin,job.destination,job.date))),
@@ -1038,35 +1037,8 @@
       else scheduleErrors.push(scheduleJobs[index].origin+"-"+scheduleJobs[index].destination+" · "+scheduleJobs[index].date);
     });
 
-    // Verified historical fallback for the NUE-PMO duty on 6 November 2026.
-    // Scheduled times are kept separate from ADS-B observations; they are used
-    // only to identify incomplete airport-receiver records.
-    const historicalFallbackRegistrations=new Map();
-    if(date==="2026-11-06"&&routes.some(([a,b])=>(a==="NUE"&&b==="PMO")||(a==="PMO"&&b==="NUE"))){
-      const verifiedFallback=[
-        {origin:"NUE",destination:"PMO",number:"FR903",departure:"09:40",arrival:"11:45",registration:"EI-HMV"},
-        {origin:"PMO",destination:"NUE",number:"FR904",departure:"12:10",arrival:"14:20",registration:"EI-HMV"}
-      ];
-      for(const item of verifiedFallback){
-        const exists=state.flights.some(f=>f.date===date&&f.flightNumber===item.number&&f.origin===item.origin&&f.destination===item.destination);
-        if(!exists)state.flights.push(makeFlight(item.origin,item.destination,item.number,item.departure,item.arrival,date,undefined,{departure:false,arrival:false},"Historical timetable fallback · Flightera/PlaneMapper"));
-        historicalFallbackRegistrations.set(item.origin+"-"+item.destination,item.registration);
-      }
-    }
-    // Verified historical fallback for the NUE-SVQ duty on 4 November 2026.
-    // Flight numbers/times are cross-checked against historical schedule sources;
-    // EI-IJL is the published aircraft registration for both operated sectors.
-    if(date==="2026-11-04"&&routes.some(([a,b])=>(a==="NUE"&&b==="SVQ")||(a==="SVQ"&&b==="NUE"))){
-      const verifiedFallback=[
-        {origin:"NUE",destination:"SVQ",number:"FR1185",departure:"12:35",arrival:"15:35",registration:"EI-IJL"},
-        {origin:"SVQ",destination:"NUE",number:"FR1184",departure:"16:10",arrival:"19:10",registration:"EI-IJL"}
-      ];
-      for(const item of verifiedFallback){
-        const exists=state.flights.some(f=>f.date===date&&f.flightNumber===item.number&&f.origin===item.origin&&f.destination===item.destination);
-        if(!exists)state.flights.push(makeFlight(item.origin,item.destination,item.number,item.departure,item.arrival,date,undefined,{departure:false,arrival:false},"Historical timetable fallback · Flightera/PlaneFinder"));
-        historicalFallbackRegistrations.set(item.origin+"-"+item.destination,item.registration);
-      }
-    }
+    // No hand-entered route/registration fallbacks: historical sectors must
+    // come from observed NUE traffic or an independently returned timetable.
     state.flights=state.flights.filter(f=>inOperationalWindow(f,date)).sort((a,b)=>a.departure-b.departure);
     const observed=[],errors=[];
     let rawObservedCount=0,routeMatchCount=0,windowMatchCount=0;
@@ -1109,7 +1081,7 @@
           .map(value=>Number(value)*1000).filter(Number.isFinite);
         const boardMatches=(state.dailyBoard?.flights||[]).filter(row=>{
           const rowReg=String(row.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-          return reg&&rowReg===reg&&routeSet.has(row.origin+"-"+row.destination);
+          return reg&&rowReg===reg&&(row.origin==="NUE"||row.destination==="NUE");
         });
         let inferred=null;
         for(const eventMs of eventTimes){
@@ -1155,9 +1127,14 @@
       }
 
       if(routeSamples.length<5)routeSamples.push(origin+"-"+destination);
-      if(!routeSet.has(origin+"-"+destination))continue;
+      // Complete observed routes are accepted for every NUE arrival/departure,
+      // regardless of whether the airport board published the registration.
+      // Board corroboration is required only when the missing endpoint had to
+      // be inferred from a schedule, to avoid attributing unrelated traffic.
+      if(origin!=="NUE"&&destination!=="NUE")continue;
       const observedRegistration=String(rawFlight.r||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      if(!observedRegistration||!eligibleRegistrations.has(observedRegistration))continue;
+      if(!observedRegistration)continue;
+      if(inferredFromScheduleCount>0&&!eligibleRegistrations.has(observedRegistration))continue;
       // When endpoints are incomplete and the route was inferred from a
       // scheduled sector, require an event close to that sector's actual
       // scheduled departure/arrival. A registration alone is not enough:
