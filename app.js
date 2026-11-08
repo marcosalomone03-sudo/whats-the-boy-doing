@@ -816,7 +816,8 @@
       const offset=Number(row[0]),lat=Number(row[1]),lon=Number(row[2]),alt=row[3],gs=Number(row[4]);
       if(!Number.isFinite(offset)||!Number.isFinite(lat)||!Number.isFinite(lon))continue;
       const onGround=String(alt).toLowerCase()==="ground";
-      const lowAltitude=Number.isFinite(Number(alt))&&Number(alt)>=0&&Number(alt)<=500&&(!Number.isFinite(gs)||gs<=100);
+      const hasAltitude=alt!==null&&alt!==undefined&&alt!=="";
+      const lowAltitude=hasAltitude&&Number.isFinite(Number(alt))&&Number(alt)>=0&&Number(alt)<=500&&(!Number.isFinite(gs)||gs<=100);
       if(!onGround&&!lowAltitude)continue;
       let nearest=null,nearestKm=Infinity;
       for(const [code,ap] of airports){
