@@ -684,47 +684,6 @@
     const missingGoogleLinks=state.googleLinks.filter(x=>!flights.some(f=>x.route===f.origin+"-"+f.destination));
     $("sectors").innerHTML=(flights.length?flights.map(f=>`<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(f.date)} · ${esc(airport(f.origin)?.name)} → ${esc(airport(f.destination)?.name)} · ${esc(f.source||"Schedule")}${f.departureEstimated||f.arrivalEstimated?" · one time estimated":""}</small></div><div class="time"><small>${f.departureEstimated?"EST. ":""}DEP · ${esc(f.origin)}</small>${f.departureEstimated?"~":""}${fmt(f.departure,airport(f.origin).tz)}<small>${f.arrivalEstimated?"EST. ":""}ARR · ${esc(f.destination)}</small>${f.arrivalEstimated?"~":""}${fmt(f.arrival,airport(f.destination).tz)}</div></div>`).join(""):`<div class="empty">No flights scheduled for this date.</div>`)+(missingGoogleLinks.length?`<div class="notice">Google fallback searches (only routes without a scheduled result): ${missingGoogleLinks.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.route)} ↗</a>`).join(" · ")}</div>`:"");
     $("sectorCount").textContent=flights.length+" SECTORS";
-    const historyEl=$("dailyHistory");
-    if(historyEl){
-      const plain=value=>{
-        if(value===null||value===undefined)return "";
-        if(typeof value==="string"||typeof value==="number")return String(value);
-        if(Array.isArray(value))return value.map(plain).filter(Boolean).join(" ");
-        if(typeof value==="object"){
-          for(const key of ["label","text","description","name","code","iataCode","icaoCode","shortName","model","value","type"])
-            if(value[key]!==undefined&&value[key]!==null){const result=plain(value[key]);if(result)return result;}
-        }
-        return "";
-      };
-      const clock=value=>{
-        const raw=plain(value);
-        const match=raw.match(/(?:T|^|\s)(\d{1,2}:\d{2})/);
-        return match?match[1].padStart(5,"0"):"";
-      };
-      const history=[...flights].sort((a,b)=>a.departure-b.departure).map(f=>{
-        const isArrival=f.boardDirection==="arrival";
-        const actual=clock(f.boardActualTime);
-        const estimated=clock(f.boardEstimatedTime);
-        const scheduled=clock(f.boardScheduledTime)||clock(isArrival?f.arrivalLocal:f.departureLocal);
-        const rawStatus=plain(f.boardStatus).trim().toUpperCase().replace(/[_-]+/g," ");
-        const eventTime=actual||estimated||scheduled;
-        let deltaText="";
-        if(actual&&scheduled){
-          const toMin=x=>Number(x.slice(0,2))*60+Number(x.slice(3,5));
-          let delta=toMin(actual)-toMin(scheduled);
-          if(delta>720)delta-=1440;if(delta< -720)delta+=1440;
-          deltaText=delta===0?"ON TIME":Math.abs(delta)+" MIN "+(delta<0?"EARLY":"LATE");
-        }
-        const statusMap={"ON TIME":"ON TIME · NO ACTUAL TIME","STARTED":"STARTED · NO ACTUAL TIME","LANDED":"LANDED","ARRIVED":"LANDED","DEPARTED":"DEPARTED","ROLLING":"TAXIING","CANCELLED":"CANCELLED","CANCELED":"CANCELLED","DIVERTED":"DIVERTED"};
-        const inferred=actual?(isArrival?"LANDED":"DEPARTED")+(isArrival&&deltaText?" · "+deltaText:""):(statusMap[rawStatus]||rawStatus||"SCHEDULED · NO ACTUAL TIME");
-        const badgeClass=/cancel|divert|delay|late/i.test(inferred)?"ground":actual?"air":"none";
-        const eventLabel=actual?(isArrival?"ACTUAL ARRIVAL":"ACTUAL DEPARTURE"):estimated?(isArrival?"EST. ARRIVAL":"EST. DEPARTURE"):"SCHEDULED";
-        const registration=plain(f.boardRegistration),aircraftType=plain(f.boardAircraftType);
-        const meta=[eventLabel,eventTime,isArrival?"":deltaText,registration,aircraftType].filter(Boolean).join(" · ");
-        return `<div class="flightrow"><div><b>${esc(f.flightNumber)} · ${esc(f.origin)} → ${esc(f.destination)}</b><small>${esc(meta)} · ${esc(f.source||"Nuremberg Airport")}</small></div><span class="status ${badgeClass}">${esc(inferred)}</span></div>`;
-      });
-      historyEl.innerHTML=history.length?history.join(""):`<div class="empty">No flight records returned for this route and date.</div>`;
-    }
     const next=flights.find(f=>f.departure>now);
     $("nextFlight").innerHTML=next?`<div class="flighttop"><div><div class="flightno">${esc(next.flightNumber)}</div><div class="route">${esc(next.origin)} → ${esc(next.destination)}</div></div><span class="status none">UPCOMING</span></div><div class="stats"><div class="stat"><small>${next.departureEstimated?"Estimated departure":"Scheduled departure"}</small><strong>${next.departureEstimated?"~":""}${fmt(next.departure,airport(next.origin).tz)}</strong></div><div class="stat"><small>${next.arrivalEstimated?"Estimated arrival":"Scheduled arrival"}</small><strong>${next.arrivalEstimated?"~":""}${fmt(next.arrival,airport(next.destination).tz)}</strong></div></div>`:`<div class="empty">No future sector in loaded timetable.</div>`;
     $("current").innerHTML=state.selected?renderAircraft(state.selected.flight,state.selected.aircraft):`<div class="empty">No live aircraft selected. The results below distinguish live ADS-B positions from airport-board-only operational status.</div>`;
@@ -732,15 +691,9 @@
     const last=storageGet();
     $("lastFlight").innerHTML=last?`<div class="flighttop"><div><div class="flightno">${esc(last.flightNumber)}</div><div class="route">${esc(last.origin)} → ${esc(last.destination)}</div></div><span class="status none">LAST AUTO-MATCHED FLIGHT</span></div><div class="stats"><div class="stat"><small>Callsign</small><strong>${esc(last.callsign)}</strong></div><div class="stat"><small>Registration</small><strong>${esc(last.registration)}</strong></div><div class="stat"><small>Aircraft type</small><strong>${esc(last.type)}</strong></div><div class="stat"><small>ICAO HEX</small><strong>${esc(last.hex)}</strong></div></div>`:`<div class="empty">No aircraft selected on this device yet.</div>`;
   }
-  function placeAutomaticMatch(showInbound) {
-    const section=$("automaticFlightMatch"), current=$("currentFlightSection"), duty=$("dutySectorsSection");
-    if(!section||!current||!duty)return;
-    if(showInbound)current.after(section); else duty.before(section);
-  }
 
   function renderCandidates(items,message="No flight or aircraft status found for the selected date and route.") {
     const el=$("candidates");
-    placeAutomaticMatch(!items.length&&Boolean(state.inboundAircraft));
     if (!items.length) { el.className="inbound-result"; el.innerHTML='<div class="empty inbound-empty">'+esc(message)+'</div>'+renderInboundAircraft(); return; }
     el.className="candidate-list";
     el.innerHTML=items.map((item,i)=>{
@@ -787,7 +740,7 @@
     const unknown=[...new Set(routes.flat().filter(code=>!airport(code)))];
     if (unknown.length) { showError(`Airport code not in the local database: ${unknown.join(", ")}. Add its airport coordinates before searching.`); return; }
     const button=$("track"); button.disabled=true; button.textContent="SEARCHING FLIGHTS…";
-    state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; renderAircraftChange(); state.googleLinks=[]; placeAutomaticMatch(false); state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
+    state.flights=[]; state.candidates=[]; state.selected=null; state.inboundAircraft=null; state.aircraftChange=null; renderAircraftChange(); state.googleLinks=[]; state.observed=[]; state.scheduleDiagnostics=[]; state.dailyBoard=null;
     $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
     $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
     try {
