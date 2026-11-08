@@ -785,7 +785,9 @@
       const live=final.filter(item=>!item.aircraft.boardOnly);
       const airborne=live.filter(item=>{
         const f=item.flight, ac=item.aircraft, altitude=numeric(ac.alt_baro), speed=numeric(ac.gs);
-        return altitude!==null&&altitude>1500&&speed!==null&&speed>=100&&nowMs>=f.departure.getTime()-20*60000&&nowMs<=f.arrival.getTime()+30*60000;
+        const inbound=ac.boardEvidence?.previousRow, inboundArrival=Date.parse(inbound?.scheduledTime||"");
+        const stillOnInboundLeg=inbound?.destination===f.origin&&Number.isFinite(inboundArrival)&&nowMs>=inboundArrival-180*60000&&nowMs<=inboundArrival+30*60000;
+        return !stillOnInboundLeg&&altitude!==null&&altitude>1500&&speed!==null&&speed>=100&&nowMs>=f.departure.getTime()-20*60000&&nowMs<=f.arrival.getTime()+30*60000;
       }).sort((a,b)=>Math.abs(a.flight.arrival.getTime()-nowMs)-Math.abs(b.flight.arrival.getTime()-nowMs));
       const ground=live.filter(item=>{
         const f=item.flight, ac=item.aircraft, lat=numeric(ac.lat), lon=numeric(ac.lon);
