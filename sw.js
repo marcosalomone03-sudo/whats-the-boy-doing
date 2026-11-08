@@ -1,4 +1,4 @@
-const CACHE_NAME = "wtbd-v36-shell";
+const CACHE_NAME = "wtbd-v37-shell";
 const SHELL_FILES = [
   "./",
   "./index.html",
