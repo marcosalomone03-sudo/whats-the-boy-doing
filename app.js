@@ -58,8 +58,10 @@
 
   const state = { flights:[], candidates:[], selected:null, inboundAircraft:null, aircraftChange:null, turnaround:null, googleLinks:[], observed:[], scheduleDiagnostics:[], pool:null, dailyBoard:null, registrationHistory:[], dayFinished:false };
   const now = new Date();
-  const today = [now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-  $("flightDate").value = today;
+  const initialBerlin=localParts(now,"Europe/Berlin");
+  const today=initialBerlin.year+"-"+initialBerlin.month+"-"+initialBerlin.day;
+  const initialDutyDate=Number(initialBerlin.hour)<3?addCalendarDay(new Date(Date.UTC(Number(initialBerlin.year),Number(initialBerlin.month)-1,Number(initialBerlin.day)-1)).toISOString().slice(0,10)):today;
+  $("flightDate").value = initialDutyDate;
   try {
     const lastRoute=localStorage.getItem(LAST_ROUTE_KEY);
     const lastDate=localStorage.getItem(LAST_DATE_KEY);
@@ -241,8 +243,21 @@
   async function loadRoute(origin,destination,date) {
     const [year,month] = date.split("-");
     const data = await get(`/api/schedule?origin=${origin}&destination=${destination}&year=${year}&month=${Number(month)}&date=${encodeURIComponent(date)}`);
-    state.scheduleDiagnostics.push({route:origin+"-"+destination,...(data.diagnostics||{}),source:data.source||"Schedule"});
+    state.scheduleDiagnostics.push({route:origin+"-"+destination,date,...(data.diagnostics||{}),source:data.source||"Schedule"});
     return normalizeSchedule(data,origin,destination,date);
+  }
+  function inOperationalWindow(flight,dutyDate) {
+    const start=dateAtAirport(dutyDate,"03:00",airport("NUE"));
+    const end=dateAtAirport(addCalendarDay(dutyDate),"03:00",airport("NUE"));
+    const anchor=flight.origin==="NUE"?flight.departure:flight.destination==="NUE"?flight.arrival:flight.departure;
+    return anchor>=start&&anchor<end;
+  }
+  function operationalDutyDate(date=new Date()) {
+    const p=localParts(date,"Europe/Berlin");
+    const calendarDate=p.year+"-"+p.month+"-"+p.day;
+    if(Number(p.hour)>=3)return calendarDate;
+    const previous=new Date(Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day)-1));
+    return previous.getUTCFullYear()+"-"+String(previous.getUTCMonth()+1).padStart(2,"0")+"-"+String(previous.getUTCDate()).padStart(2,"0");
   }
 
   function overflightRows(data) {
@@ -290,9 +305,12 @@
     renderObserved(errors.length?"Some FlyItalyADSB checks failed: "+[...new Set(errors)].join(" · "):"");
   }
   async function loadDailyBoard(date) {
-    const data=await get("/api/daily-board?date="+encodeURIComponent(date));
-    if(!Array.isArray(data?.flights))throw new Error("Daily NUE board response is incomplete.");
-    state.dailyBoard=data; return data;
+    const nextDate=addCalendarDay(date);
+    const responses=await Promise.all([date,nextDate].map(day=>get("/api/daily-board?date="+encodeURIComponent(day))));
+    if(responses.some(data=>!Array.isArray(data?.flights)))throw new Error("Daily NUE board response is incomplete.");
+    const flights=[...responses[0].flights,...responses[1].flights];
+    state.dailyBoard={date,operationalWindow:{start:date+" 03:00",end:nextDate+" 02:59"},airport:"NUE",source:"Nuremberg Airport two-calendar-day board",flightCount:flights.length,flights};
+    return state.dailyBoard;
   }
   function boardRegistrationEvidence(flight,registration) {
     const reg=String(registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
@@ -1214,10 +1232,13 @@
     $("candidates").className="empty"; $("candidates").textContent="Reading the NUE flight board, then querying ADS-B directly by aircraft registration…";
     $("connection").textContent="Checking Nuremberg Airport board…"; $("lastUpdated").textContent="SEARCHING";
     try {
+      const nextDate=addCalendarDay(date);
       const boardResult=await loadDailyBoard(date).catch(error=>{console.warn("Daily NUE board unavailable",error);return null;});
-      const responses=await Promise.allSettled(routes.map(([o,d])=>loadRoute(o,d,date)));
+      const routeJobs=routes.flatMap(([o,d])=>[date,nextDate].map(day=>({route:[o,d],date:day})));
+      const responses=await Promise.allSettled(routeJobs.map(job=>loadRoute(job.route[0],job.route[1],job.date)));
       const scheduleErrors=[];
-      responses.forEach((r,i)=>{ if(r.status==="fulfilled")state.flights.push(...r.value); else scheduleErrors.push(`${routes[i].join("-")}: ${r.reason?.message||"schedule unavailable"}`); });
+      responses.forEach((r,i)=>{ if(r.status==="fulfilled")state.flights.push(...r.value); else scheduleErrors.push(`${routeJobs[i].route.join("-")} (${routeJobs[i].date}): ${r.reason?.message||"schedule unavailable"}`); });
+      state.flights=state.flights.filter(f=>inOperationalWindow(f,date));
       state.flights.sort((a,b)=>a.departure-b.departure); render();
       if(!state.flights.length){
         const d=state.scheduleDiagnostics[0]||{};
@@ -1228,8 +1249,7 @@
         showError("NUE timetable diagnostic ("+(d.route||"route")+"): "+detail);
         return;
       }
-      const deviceNow=new Date();
-      const today=[deviceNow.getFullYear(),String(deviceNow.getMonth()+1).padStart(2,"0"),String(deviceNow.getDate()).padStart(2,"0")].join("-");
+      const today=operationalDutyDate(new Date());
       if(date!==today){
         renderCandidates([],"Historical live ADS-B lookup is not enabled. The timetable is available, but no current position is queried for a past date.");
         $("connection").textContent="Timetable loaded · live registration lookup is only available for today";
