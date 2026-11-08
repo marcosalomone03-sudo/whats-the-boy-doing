@@ -376,6 +376,15 @@ export default {
     }catch{}
     return cors(responseBody,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"no-store","X-WTBD-History-Source":upstream.headers.get("X-History-Source")||"FlyItalyADSB"});
    }
+   if(u.pathname==="/api/observed-route"){
+    if(!env.FLYITALYADSB_API_KEY)return cors(JSON.stringify({error:"FLYITALYADSB_API_KEY secret is not configured on this Worker."}),503,{"Content-Type":"application/json"});
+    const from=(u.searchParams.get("from")||"").toUpperCase(),to=(u.searchParams.get("to")||"").toUpperCase(),days=Number(u.searchParams.get("days")||7);
+    if(!/^[A-Z]{3,4}$/.test(from)||!/^[A-Z]{3,4}$/.test(to)||from===to||!Number.isInteger(days)||days<1||days>7)return cors(JSON.stringify({error:"Invalid observed route parameters"}),400,{"Content-Type":"application/json"});
+    const targetUrl="https://api.flyitalyadsb.com/v2/flights/route/"+encodeURIComponent(from)+"/"+encodeURIComponent(to)+"?days="+days;
+    const upstream=await fetch(targetUrl,{headers:{"Accept":"application/json","X-Api-Key":env.FLYITALYADSB_API_KEY,"User-Agent":"WhatsTheBoyDoing/22.0"}});
+    const body=await upstream.text();
+    return cors(body,upstream.status,{"Content-Type":upstream.headers.get("Content-Type")||"application/json","Cache-Control":"no-store","X-WTBD-Route-History-Source":"FlyItalyADSB"});
+   }
    if(u.pathname==="/api/observed" || u.pathname==="/api/overflights"){
     if(!env.FLYITALYADSB_API_KEY)return cors(JSON.stringify({error:"FLYITALYADSB_API_KEY secret is not configured on this Worker."}),503,{"Content-Type":"application/json"});
     let targetUrl="";
